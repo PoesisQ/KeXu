@@ -1,0 +1,6 @@
+{
+  "appId": "com.poesis.kexu",
+  "appName": "KeXu",
+  "webDir": "dist",
+  "server": { "androidScheme": "https" }
+}

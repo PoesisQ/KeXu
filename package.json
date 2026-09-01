@@ -1,0 +1,46 @@
+{
+  "name": "kexu",
+  "private": true,
+  "version": "0.9.0",
+  "description": "A local-first, ad-free Android and PWA timetable app.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PoesisQ/KeXu.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PoesisQ/KeXu/issues"
+  },
+  "homepage": "https://github.com/PoesisQ/KeXu#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "check": "npm test && npm run build",
+    "android:assets": "node scripts/generate-android-assets.mjs",
+    "android:sync": "npm run build && cap sync android && npm run android:assets",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "sharp": "^0.35.4",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^0.21.1",
+    "vitest": "^4.1.11"
+  }
+}

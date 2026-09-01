@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.apk binary
+*.jar binary
+*.pfb binary
+*.ttf binary
+*.bcmap binary
+public/cmaps/LICENSE -whitespace
+public/standard_fonts/LICENSE_* -whitespace
