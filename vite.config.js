@@ -12,12 +12,12 @@ export default defineConfig({
         name: 'KeXu',
         short_name: 'KeXu',
         description: '无广告、本地优先的高自由度课表',
-        theme_color: '#f4f2ec',
-        background_color: '#f4f2ec',
+        theme_color: '#fbfaf7',
+        background_color: '#fbfaf7',
         display: 'standalone',
         start_url: '/',
         icons: [
-          { src: 'icon-kexu.png', sizes: '512x512', type: 'image/png', purpose: 'any' }
+          { src: 'icon-kexu.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
         ]
       },
       workbox: {

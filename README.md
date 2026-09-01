@@ -12,7 +12,7 @@
 
 KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 应用。它希望把“导入、查看、修改、提醒”这条最常用的路径做得足够快、清楚且可控，而不是把课表塞进社交、成绩查询或内容社区中。
 
-当前版本：`0.9.0`
+当前版本：`0.9.1`
 
 ## 界面预览
 
@@ -54,6 +54,7 @@ KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 
 - 同一时段跨周出现多门课程时，课表只显示对应课程颜色条；点击后列出该时段的全部本周与非本周课程。
 - 单日页面支持日期与课程内容整体跟手左右滑动；偏离今天时提供“回到今天”。
 - 点击空白节次添加课程，点击课程进入完整详情。
+- Android 系统返回键与边缘返回手势按界面层级回退：先关闭展开内容和选择面板，再关闭详情页，不会误退出应用。
 
 ### 课程编辑
 
@@ -101,7 +102,6 @@ KeXu/
 ├─ android/                      # Capacitor Android 工程与原生提醒插件
 ├─ public/
 │  ├─ icon-kexu.png             # KeXu 应用图标源图
-│  ├─ icon-kexu.svg             # 可编辑的双色矢量图标
 │  ├─ cmaps/                     # PDF 中文字体映射
 │  └─ standard_fonts/            # PDF.js 标准字体资源
 ├─ scripts/
@@ -109,8 +109,10 @@ KeXu/
 │  └─ build-apk-wsl.sh
 ├─ src/
 │  ├─ components/AppErrorBoundary.jsx
+│  ├─ hooks/useBackHandler.js    # Android 分层返回处理
 │  ├─ hooks/useWeekPager.js      # 双轴手势、惯性与周切换状态
 │  ├─ App.jsx                    # 页面与业务编排
+│  ├─ backNavigation.js          # 弹层返回栈
 │  ├─ config.js                  # 应用名与版本
 │  ├─ data.js                    # 去标识化演示学期及默认设置
 │  ├─ gesture.js                 # 可测试的速度/惯性纯函数

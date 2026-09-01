@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App as NativeApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import {
   BellRing, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, FileScan,
   GraduationCap, Image as ImageIcon, LayoutGrid, MapPin, MoreHorizontal, Palette, Plus, RotateCcw,
@@ -14,6 +16,8 @@ import {
 import { exportState, loadState, saveState } from './storage';
 import { getReminderStatus, openReminderSettings, remindersAvailable, requestReminderAccess, syncNativeReminders } from './reminders';
 import { useWeekPager } from './hooks/useWeekPager';
+import { useBackHandler } from './hooks/useBackHandler';
+import { backStack } from './backNavigation';
 
 const TODAY = new Date();
 const shortDate = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' });
@@ -173,6 +177,7 @@ function WeekGrid({ semester, week, settings, overrides, onOpen, onAdd }) {
 }
 
 function SlotSheet({ group, week, locationMode, onClose, onChoose }) {
+  useBackHandler(true, onClose);
   const ordered = [...group.items].sort((a, b) => Number(b.active) - Number(a.active) || a.meeting.start - b.meeting.start);
   return <div className="modal-root" role="dialog" aria-modal="true" aria-label="该时段全部课程">
     <button className="modal-backdrop" aria-label="关闭" onClick={onClose} />
@@ -206,6 +211,7 @@ function WeekPage({ semester, week, day, settings, overrides, onDay, onOpen, onA
 }
 
 function WeekPicker({ semester, week, currentWeek, onSelect, onClose }) {
+  useBackHandler(true, onClose);
   return <div className="modal-root" role="dialog" aria-modal="true" aria-label="选择周次">
     <button className="modal-backdrop" aria-label="关闭周次选择" onClick={onClose} />
     <section className="bottom-sheet week-picker-sheet">
@@ -267,6 +273,7 @@ function DayPage({ semester, week, day, settings, overrides, onDay, onOpen, onAd
 }
 
 function ChoiceSheet({ title, value, options, onSelect, onClose }) {
+  useBackHandler(true, onClose);
   return <div className="modal-root" role="dialog" aria-modal="true" aria-label={title}>
     <button className="modal-backdrop" aria-label="关闭选择" onClick={onClose} />
     <section className="bottom-sheet choice-sheet">
@@ -296,6 +303,11 @@ function DetailSheet({ selected, semester, week, overrides, onClose, onSave, onD
   const [scope, setScope] = useState(isNew ? 'all' : 'this');
   const [showMore, setShowMore] = useState(false);
   const [showMilestone, setShowMilestone] = useState(false);
+  useBackHandler(true, () => {
+    if (showMilestone) setShowMilestone(false);
+    else if (showMore) setShowMore(false);
+    else onClose();
+  });
   const [form, setForm] = useState(() => ({
     title: course?.title || '', teacher: course?.teacher || '', credits: course?.credits || '',
     category: course?.category || '理论', location: originalMeeting?.location || '', day: originalMeeting?.day || 1,
@@ -385,6 +397,10 @@ function ImportSheet({ state, onClose, onCommit, onApiKey }) {
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
   const fileInput = useRef(null);
+  useBackHandler(true, () => {
+    if (step === 'review') setStep('choose');
+    else onClose();
+  });
 
   const begin = async (chosen) => {
     setFile(chosen); setStep('reading'); setError('');
@@ -520,6 +536,8 @@ export default function App() {
   const [weekPicking, setWeekPicking] = useState(false);
   const [toast, setToast] = useState('');
   const [reminderStatus, setReminderStatus] = useState(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const todayWeek = currentAcademicWeek(semester.firstMonday);
   const todayDay = clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7);
   const semesterContainsToday = todayWeek >= 1 && todayWeek <= semester.weekCount;
@@ -545,6 +563,23 @@ export default function App() {
     onWeekChange: setDateIndex
   });
   useEffect(() => { saveState(state); }, [state]);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return undefined;
+    let disposed = false;
+    let listener;
+    NativeApp.addListener('backButton', () => {
+      if (backStack.dispatch()) return;
+      if (viewRef.current !== 'week') setView('week');
+      else NativeApp.exitApp();
+    }).then((handle) => {
+      if (disposed) handle.remove();
+      else listener = handle;
+    });
+    return () => {
+      disposed = true;
+      listener?.remove();
+    };
+  }, []);
   useEffect(() => {
     resetPager();
     resetDayPager();
