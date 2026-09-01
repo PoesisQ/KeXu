@@ -10,11 +10,21 @@ public class MainActivity extends BridgeActivity {
         SystemBars.apply(this, SystemBars.storedDark(this), false);
         super.onCreate(savedInstanceState);
         SystemBars.apply(this, SystemBars.storedDark(this), false);
+        syncSystemBarsFromWeb();
     }
 
     @Override
     public void onResume() {
         super.onResume();
         SystemBars.apply(this, SystemBars.storedDark(this), false);
+        syncSystemBarsFromWeb();
+    }
+
+    private void syncSystemBarsFromWeb() {
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(
+            "document.documentElement.dataset.theme || 'light'",
+            value -> SystemBars.apply(this, "\"dark\"".equals(value), true)
+        ), 300);
     }
 }

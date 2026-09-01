@@ -19,6 +19,8 @@ const checks = [
   ['Android 原生布局标识', app.includes("Capacitor.getPlatform() === 'android' ? 'native-android' : ''")],
   ['主题同步到原生系统栏', app.includes('SystemAppearance.setTheme({ dark })') && mainActivity.includes('SystemAppearancePlugin.class')],
   ['Android 顶栏禁用 OEM 模糊合成', /\.native-android \.topbar[^}]+backdrop-filter: none/.test(css)],
+  ['Android 顶栏使用显式文字颜色', /\.native-android \.week-title[^}]+-webkit-text-fill-color/.test(css)],
+  ['Android 固定背景层降级', css.includes('.native-android.view-week .wallpaper') && css.includes('position: absolute')],
   ['状态栏与导航栏同步', systemBars.includes('setAppearanceLightStatusBars(!dark)') && systemBars.includes('setAppearanceLightNavigationBars(!dark)')],
   ['Android 15 非预期边到边防护', styles35.includes('windowOptOutEdgeToEdgeEnforcement')],
   ['启动主题回落', styles.includes('postSplashScreenTheme')],
