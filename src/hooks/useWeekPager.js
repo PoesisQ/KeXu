@@ -25,6 +25,8 @@ export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart,
     pager.style.setProperty('--drag-previous', `${motion.previous}`);
     pager.style.setProperty('--drag-next-pct', `${motion.next * 100}%`);
     pager.style.setProperty('--drag-previous-pct', `${motion.previous * 100}%`);
+    pager.style.setProperty('--next-edge-guard', `${1 - motion.next}px`);
+    pager.style.setProperty('--previous-edge-guard', `${1 - motion.previous}px`);
     pager.style.setProperty('--day-highlight-shift', `${motion.highlight * 100}%`);
   }, []);
 

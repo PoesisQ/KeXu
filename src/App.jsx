@@ -289,11 +289,13 @@ function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday }) {
       </div>
     </div>
     <div className="day-strip">
-      <span className={`day-selection ${boundaryPrevious ? 'leaving-previous' : ''} ${boundaryNext ? 'leaving-next' : ''}`} style={{ '--selection-base': `${(current.day - 1) * 100}%` }} aria-hidden="true">
-        {selectionPages.map(({ className, meta }) => renderSelectionText(meta, className))}
+      <span className="day-selection-viewport" aria-hidden="true">
+        <span className={`day-selection ${boundaryPrevious ? 'leaving-previous' : ''} ${boundaryNext ? 'leaving-next' : ''}`} style={{ '--selection-base': `${(current.day - 1) * 100}%` }}>
+          {selectionPages.map(({ className, meta }) => renderSelectionText(meta, className))}
+        </span>
+        {boundaryPrevious && <span className="day-selection day-selection-wrap wrap-previous" style={{ '--selection-base': '700%' }}>{renderSelectionText(boundaryPrevious, 'selection-wrap-text')}</span>}
+        {boundaryNext && <span className="day-selection day-selection-wrap wrap-next" style={{ '--selection-base': '-100%' }}>{renderSelectionText(boundaryNext, 'selection-wrap-text')}</span>}
       </span>
-      {boundaryPrevious && <span className="day-selection day-selection-wrap wrap-previous" style={{ '--selection-base': '700%' }} aria-hidden="true">{renderSelectionText(boundaryPrevious, 'selection-wrap-text')}</span>}
-      {boundaryNext && <span className="day-selection day-selection-wrap wrap-next" style={{ '--selection-base': '-100%' }} aria-hidden="true">{renderSelectionText(boundaryNext, 'selection-wrap-text')}</span>}
       {renderDateLabels(current.dates)}
     </div>
   </section>;

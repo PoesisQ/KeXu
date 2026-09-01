@@ -83,7 +83,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .card-title { font-size: clamp(12.5px, 3.35vw, 15px); font-weight: 790; line-height: 1.16; letter-spacing: -.22px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; word-break: break-all; text-wrap: pretty; }
 .type-tag { display: inline-block; font-size: 8.5px; font-weight: 760; line-height: 14px; padding: 0 3px; background: color-mix(in srgb, var(--course) 76%, #65706a); color: white; border-radius: 5px; margin: 0 2px 2px 0; vertical-align: 1px; white-space: nowrap; }
 .type-tag.warm { background: #262722; }
-.card-location { display: block; width: calc(100% + 2px); min-height: 16px; margin-top: auto; padding: 1px 0 0; color: #35423d; font-size: clamp(10.2px, 2.7vw, 13px); line-height: 1.12; font-weight: 780; letter-spacing: -.55px; overflow: hidden; opacity: 1; white-space: nowrap; text-overflow: ellipsis; transform: translateX(-2px); }
+.card-location { display: block; width: calc(100% + 1px); min-height: 16px; margin-top: auto; padding: 1px 0 0; color: #35423d; font-size: clamp(10.2px, 2.7vw, 13px); line-height: 1.12; font-weight: 780; letter-spacing: -.55px; overflow: hidden; opacity: 1; white-space: nowrap; text-overflow: ellipsis; transform: translateX(-1px); }
 .card-location svg { display: none; vertical-align: -2px; margin-right: 1px; }
 .inactive { background: rgba(234,234,231,.72); color: #929792; box-shadow: inset 0 0 0 1px rgba(255,255,255,.58); z-index: 1; }
 .inactive .card-accent { background: #c2c4bf; }
@@ -116,7 +116,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .page-enter { animation: pageIn .3s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes pageIn { from { opacity: 0; transform: translateY(7px); } }
-.day-pager { --drag-x: 0px; --drag-progress-pct: 0%; --drag-amount: 0; --drag-next: 0; --drag-previous: 0; --day-highlight-shift: 0%; position: relative; z-index: 3; height: calc(100dvh - var(--topbar-height)); overflow: hidden; display: flex; flex-direction: column; touch-action: pan-y; user-select: none; contain: layout paint; }
+.day-pager { --drag-x: 0px; --drag-progress-pct: 0%; --drag-amount: 0; --drag-next: 0; --drag-previous: 0; --next-edge-guard: 1px; --previous-edge-guard: 1px; --day-highlight-shift: 0%; position: relative; z-index: 3; height: calc(100dvh - var(--topbar-height)); overflow: hidden; display: flex; flex-direction: column; touch-action: pan-y; user-select: none; contain: layout paint; }
 .day-chrome { position: relative; z-index: 4; flex: 0 0 auto; padding: 20px 18px 0; contain: layout paint style; }
 .day-carousel-window { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; contain: layout paint; }
 .day-page { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 0 18px 118px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; contain: layout paint style; backface-visibility: hidden; will-change: transform; }
@@ -139,7 +139,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .day-strip-labels { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); opacity: 1; }
 .day-strip-labels button { width: 100%; min-width: 0; margin: 0; border: 0; border-radius: 13px; background: none; padding: 7px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--muted); text-align: center; }
 .day-strip-labels button span { width: 100%; font-size: 10px; line-height: 1.2; font-weight: 400; text-align: center; }.day-strip-labels button b { display: block; width: 100%; font-size: 15px; line-height: 1.25; font-variant-numeric: tabular-nums; text-align: center; }
-.day-selection { position: absolute; z-index: 2; left: 6px; top: 6px; bottom: 6px; width: calc((100% - 12px) / 7); border-radius: 13px; background: var(--ink); color: var(--surface); box-shadow: 0 6px 14px rgba(0,0,0,.13); transform: translate3d(calc(var(--selection-base) + var(--day-highlight-shift)),0,0); pointer-events: none; will-change: transform; overflow: hidden; }
+.day-selection-viewport { position: absolute; z-index: 2; left: 6px; right: 6px; top: 0; bottom: 0; overflow: hidden; pointer-events: none; }
+.day-selection { position: absolute; left: 0; top: 6px; bottom: 6px; width: calc(100% / 7); border-radius: 13px; background: var(--ink); color: var(--surface); box-shadow: 0 6px 14px rgba(0,0,0,.13); transform: translate3d(calc(var(--selection-base) + var(--day-highlight-shift)),0,0); pointer-events: none; will-change: transform; overflow: hidden; }
+.day-selection.wrap-previous { transform: translate3d(calc(var(--selection-base) + var(--day-highlight-shift) + var(--previous-edge-guard)),0,0); }
+.day-selection.wrap-next { transform: translate3d(calc(var(--selection-base) + var(--day-highlight-shift) - var(--next-edge-guard)),0,0); }
 .day-selection-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; opacity: 0; }
 .day-selection-text small { font-size: 10px; line-height: 1.2; font-weight: 400; }.day-selection-text b { font-size: 15px; line-height: 1.25; font-variant-numeric: tabular-nums; }
 .day-selection-text.selection-current { opacity: calc(1 - var(--drag-amount)); }.day-selection-text.selection-previous { opacity: var(--drag-previous); }.day-selection-text.selection-next { opacity: var(--drag-next); }.day-selection-text.selection-wrap-text { opacity: 1; }
