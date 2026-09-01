@@ -3,7 +3,7 @@ import { pointerVelocity, resolveWeekSwipe } from '../gesture';
 
 const SETTLE_MS = 340;
 
-export function useWeekPager({ week, weekCount, onWeekChange }) {
+export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart, onTransitionEnd }) {
   const pagerRef = useRef(null);
   const dragRef = useRef(null);
   const settlingRef = useRef(false);
@@ -35,6 +35,7 @@ export function useWeekPager({ week, weekCount, onWeekChange }) {
     const next = Math.min(weekCount, Math.max(1, week + direction));
     if (next === week || settlingRef.current) return;
     settlingRef.current = true;
+    onTransitionStart?.(next);
     const width = pagerRef.current?.clientWidth || window.innerWidth;
     setPagerOffset(-direction * width, true);
     clearTimeout(timerRef.current);
@@ -45,9 +46,10 @@ export function useWeekPager({ week, weekCount, onWeekChange }) {
         pager.style.setProperty('--drag-x', '0px');
       }
       onWeekChange(next);
+      onTransitionEnd?.(next);
       settlingRef.current = false;
     }, SETTLE_MS + 20);
-  }, [onWeekChange, setPagerOffset, week, weekCount]);
+  }, [onTransitionEnd, onTransitionStart, onWeekChange, setPagerOffset, week, weekCount]);
 
   const navigateWeek = useCallback((value, absolute = false) => {
     if (settlingRef.current) return;
@@ -56,9 +58,11 @@ export function useWeekPager({ week, weekCount, onWeekChange }) {
     if (Math.abs(next - week) === 1 && pagerRef.current) finishWeekSlide(next > week ? 1 : -1);
     else {
       setPagerOffset(0, false);
+      onTransitionStart?.(next);
       onWeekChange(next);
+      onTransitionEnd?.(next);
     }
-  }, [finishWeekSlide, onWeekChange, setPagerOffset, week, weekCount]);
+  }, [finishWeekSlide, onTransitionEnd, onTransitionStart, onWeekChange, setPagerOffset, week, weekCount]);
 
   const onPointerDown = useCallback((event) => {
     if (settlingRef.current || event.button > 0) return;

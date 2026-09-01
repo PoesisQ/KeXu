@@ -24,6 +24,11 @@ const shortDate = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'num
 
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
 function uid(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
+function suggestedSemesterName(date = TODAY) {
+  const year = date.getFullYear();
+  return date.getMonth() >= 7 ? `${year}-${year + 1} 第1学期` : `${year - 1}-${year} 第2学期`;
+}
+function mondayOfCurrentWeek(date = TODAY) { return toISODate(addDays(date, -((date.getDay() + 6) % 7))); }
 
 function IconButton({ label, children, className = '', ...props }) {
   return <button type="button" aria-label={label} className={`icon-button ${className}`} {...props}>{children}</button>;
@@ -383,13 +388,13 @@ function ImportPreview({ courses, setCourses }) {
   </article>)}</div>;
 }
 
-function ImportSheet({ state, onClose, onCommit, onApiKey }) {
+function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) {
   const [step, setStep] = useState('choose');
   const [file, setFile] = useState(null);
-  const [semesterId, setSemesterId] = useState(state.activeSemesterId);
+  const [semesterId, setSemesterId] = useState(initialSemesterId === 'new' ? 'new' : state.activeSemesterId);
   const existing = state.semesters.find((item) => item.id === semesterId);
-  const [semesterName, setSemesterName] = useState(existing?.name || '');
-  const [firstMonday, setFirstMonday] = useState(existing?.firstMonday || toISODate(addDays(TODAY, -((TODAY.getDay() + 6) % 7))));
+  const [semesterName, setSemesterName] = useState(existing?.name || suggestedSemesterName());
+  const [firstMonday, setFirstMonday] = useState(existing?.firstMonday || mondayOfCurrentWeek());
   const [courses, setCourses] = useState([]);
   const [rawText, setRawText] = useState('');
   const [method, setMethod] = useState('');
@@ -415,6 +420,17 @@ function ImportSheet({ state, onClose, onCommit, onApiKey }) {
     try { const { refineWithDeepSeek } = await import('./importer'); setCourses(await refineWithDeepSeek(rawText, state.settings.apiKey)); setMethod('本地 OCR + DeepSeek 结构化'); setStep('review'); }
     catch (reason) { setError(reason.message); setStep('review'); }
   };
+  const chooseSemesterTarget = (value) => {
+    setSemesterId(value);
+    const found = state.semesters.find((item) => item.id === value);
+    if (found) {
+      setSemesterName(found.name);
+      setFirstMonday(found.firstMonday);
+    } else {
+      setSemesterName(suggestedSemesterName());
+      setFirstMonday(mondayOfCurrentWeek());
+    }
+  };
 
   return <div className="modal-root" role="dialog" aria-modal="true">
     <button className="modal-backdrop" aria-label="关闭" onClick={onClose} />
@@ -424,6 +440,7 @@ function ImportSheet({ state, onClose, onCommit, onApiKey }) {
       <div className="sheet-scroll">
         {step === 'choose' && <>
           <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>PDF 或课表截图都可以</h3><p>优先读取文本；遇到乱码 PDF 会自动切换本地中文 OCR。原文件不会上传。</p></div>
+          {initialSemesterId === 'new' && <div className="new-semester-intent"><Plus /><div><b>将创建一个独立新学期</b><span>识别完成后设置学期名称与第一周周一。</span></div></div>}
           <button className="drop-zone" onClick={() => fileInput.current?.click()}><Upload /><span>选择课表文件</span><small>PDF · PNG · JPG</small></button>
           <input hidden ref={fileInput} type="file" accept="application/pdf,image/*" onChange={(e) => e.target.files[0] && begin(e.target.files[0])} />
           {error && <p className="error-text">{error}</p>}
@@ -432,9 +449,14 @@ function ImportSheet({ state, onClose, onCommit, onApiKey }) {
         {step === 'review' && <>
           <div className="recognition-summary"><Check /><div><b>{method}</b><span>请确认课程名、周次和地点后再保存</span></div></div>
           <div className="semester-form">
-            <Field label="保存到学期"><select value={semesterId} onChange={(e) => { const value = e.target.value; setSemesterId(value); const found = state.semesters.find((item) => item.id === value); if (found) { setSemesterName(found.name); setFirstMonday(found.firstMonday); } }}><option value="new">＋ 新建学期</option>{state.semesters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>
-            <Field label="学期名称"><input value={semesterName} onChange={(e) => setSemesterName(e.target.value)} placeholder="2026-2027 第1学期" /></Field>
+            <div className="semester-target-tabs" role="group" aria-label="课表保存方式">
+              <button className={semesterId !== 'new' ? 'active' : ''} onClick={() => chooseSemesterTarget(state.activeSemesterId)}>合并到已有学期</button>
+              <button className={semesterId === 'new' ? 'active' : ''} onClick={() => chooseSemesterTarget('new')}>＋ 新建学期</button>
+            </div>
+            {semesterId !== 'new' && <Field label="已有学期" className="semester-existing"><select value={semesterId} onChange={(e) => chooseSemesterTarget(e.target.value)}>{state.semesters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>}
+            <Field label={semesterId === 'new' ? '新学期名称' : '学期名称'}><input value={semesterName} onChange={(e) => setSemesterName(e.target.value)} placeholder="2026-2027 第1学期" /></Field>
             <Field label="第一周周一"><input type="date" value={firstMonday} onChange={(e) => setFirstMonday(e.target.value)} /></Field>
+            {semesterId === 'new' && <p className="semester-target-note">导入后会创建独立学期，不会覆盖当前学期的课程和手动修改。</p>}
           </div>
           <ImportPreview courses={courses} setCourses={setCourses} />
           {!courses.length && <div className="empty-recognition"><p>本地规则没有可靠拆出课程。可以复制下方 OCR 文本手动检查，或让 DeepSeek 只做一次结构化整理。</p></div>}
@@ -477,8 +499,8 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
   const openPicker = (title, value, options, onSelect) => setPicker({ title, value: String(value), options, onSelect });
   return <>
   <main className="settings-view page-enter">
-    <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={onOpenImport}><FileScan /><span><b>导入新课表</b><small>识别 PDF 或课表截图并合并到学期</small></span><ChevronRight /></button></div></section>
-    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => openPicker('选择学期', state.activeSemesterId, semesterOptions, onSemester)} /></div></div></section>
+    <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>识别 PDF 或课表截图并合并到学期</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => openPicker('选择学期', state.activeSemesterId, semesterOptions, onSemester)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>周课表显示</h2><div className="setting-card">
       <div className="setting-row"><div><b>地点显示</b><span>完整地址仍保留在详情中</span></div><SettingChoice value={labelFor(locationOptions, settings.locationMode)} onClick={() => openPicker('地点显示', settings.locationMode, locationOptions, (value) => update({ locationMode: value }))} /></div>
         <div className="setting-row"><div><b>显示非本周课程</b><span>只用课程色条提示时段占用</span></div><button className={`switch ${settings.showInactive ? 'on' : ''}`} onClick={() => update({ showInactive: !settings.showInactive })}><i /></button></div>
@@ -509,7 +531,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
     </div></section>
     <section className="settings-group"><h2>可选智能校对</h2><div className="setting-card"><div className="api-field"><div><b>DeepSeek API Key</b><span>仅在你主动点击“校对结构”时调用</span></div><input type="password" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value.trim() })} placeholder="sk-…" /></div></div></section>
     <section className="settings-group"><h2>数据</h2><div className="setting-card compact"><button className="setting-action" onClick={downloadBackup}><Download /><span><b>导出完整备份</b><small>课程、修改与设置</small></span><ChevronRight /></button></div></section>
-    <p className="version-note">{APP_NAME} {APP_VERSION} · 数据永远属于你</p>
+    <p className="version-note">{APP_NAME} {APP_VERSION} · 让摸鱼更高效，坐牢更舒心</p>
   </main>
   {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
   </>;
@@ -527,6 +549,9 @@ export default function App() {
   const [state, setState] = useState(loadState);
   const semester = state.semesters.find((item) => item.id === state.activeSemesterId) || state.semesters[0];
   const [week, setWeek] = useState(() => clamp(currentAcademicWeek(semester.firstMonday), 1, semester.weekCount));
+  const [headerWeek, setHeaderWeek] = useState(week);
+  const [weekSettling, setWeekSettling] = useState(false);
+  const [daySettling, setDaySettling] = useState(false);
   const [day, setDay] = useState(() => clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7));
   const [view, setView] = useState('week');
   const [selected, setSelected] = useState(null);
@@ -543,7 +568,9 @@ export default function App() {
   const { pagerRef, suppressClickRef, navigateWeek, resetPager, pointerHandlers } = useWeekPager({
     week,
     weekCount: semester.weekCount,
-    onWeekChange: setWeek
+    onWeekChange: setWeek,
+    onTransitionStart: (nextWeek) => { setHeaderWeek(nextWeek); setWeekSettling(true); },
+    onTransitionEnd: () => setWeekSettling(false)
   });
   const dayIndex = (week - 1) * 7 + day;
   const setDateIndex = useCallback((nextIndex) => {
@@ -559,9 +586,12 @@ export default function App() {
   } = useWeekPager({
     week: dayIndex,
     weekCount: semester.weekCount * 7,
-    onWeekChange: setDateIndex
+    onWeekChange: setDateIndex,
+    onTransitionStart: (nextIndex) => { setHeaderWeek(Math.floor((nextIndex - 1) / 7) + 1); setDaySettling(true); },
+    onTransitionEnd: () => setDaySettling(false)
   });
   useEffect(() => { saveState(state); }, [state]);
+  useEffect(() => { setHeaderWeek(week); }, [week]);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return undefined;
     let disposed = false;
@@ -582,6 +612,8 @@ export default function App() {
   useEffect(() => {
     resetPager();
     resetDayPager();
+    setWeekSettling(false);
+    setDaySettling(false);
     setWeek(clamp(currentAcademicWeek(semester.firstMonday), 1, semester.weekCount));
   }, [resetDayPager, resetPager, semester.firstMonday, semester.id, semester.weekCount]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 2200); return () => clearTimeout(timer); }, [toast]);
@@ -725,9 +757,9 @@ export default function App() {
   return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'}`}>
     <div className="wallpaper" style={wallpaperStyle} />
     <div className="wallpaper-wash" style={{ opacity: state.settings.wallpaper ? Math.max(0, 1 - state.settings.wallpaperOpacity) : 1 }} />
-    {view !== 'settings' && <TopBar semester={semester} week={week} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting(true)} />}
+    {view !== 'settings' && <TopBar semester={semester} week={headerWeek} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}
     {view === 'week' && <div
-      className="week-pager"
+      className={`week-pager ${weekSettling ? 'settling' : ''}`}
       ref={pagerRef}
       {...pointerHandlers}
       onClickCapture={(event) => { if (suppressClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
@@ -739,7 +771,7 @@ export default function App() {
       })}
     </div>}
     {view === 'day' && <div
-      className="day-pager"
+      className={`day-pager ${daySettling ? 'settling' : ''}`}
       ref={dayPagerRef}
       {...dayPointerHandlers}
       onClickCapture={(event) => { if (suppressDayClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
@@ -750,15 +782,15 @@ export default function App() {
         const pageWeek = Math.floor((pageIndex - 1) / 7) + 1;
         const pageDay = ((pageIndex - 1) % 7) + 1;
         const selectDate = slot === 0 ? (nextDay) => navigateDate((pageWeek - 1) * 7 + nextDay, true) : () => {};
-        return <DayPage key={pageIndex} semester={semester} week={pageWeek} day={pageDay} settings={state.settings} overrides={state.overrides} onDay={selectDate} onOpen={slot === 0 ? openOccurrence : () => {}} onAdd={slot === 0 ? addAt : () => {}} onToday={slot === 0 ? returnToToday : null} className={`carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} style={{ '--page-base': `${slot * 100}%` }} />;
+        return <DayPage key={pageIndex} semester={semester} week={pageWeek} day={pageDay} settings={state.settings} overrides={state.overrides} onDay={selectDate} onOpen={slot === 0 ? openOccurrence : () => {}} onAdd={slot === 0 ? addAt : () => {}} onToday={returnToToday} className={`carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} style={{ '--page-base': `${slot * 100}%` }} />;
       })}
     </div>}
-    {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={() => setImporting(true)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} reminderStatus={reminderStatus} />}
+    {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} reminderStatus={reminderStatus} />}
     <BottomNav view={view} setView={setView} />
     {slotGroup && <SlotSheet group={slotGroup} week={week} locationMode={state.settings.locationMode} onClose={() => setSlotGroup(null)} onChoose={(item) => { setSlotGroup(null); openOccurrence(item); }} />}
     {selected && <DetailSheet key={`${selected.meeting?.id}-${week}`} selected={selected} semester={semester} week={week} overrides={state.overrides} onClose={() => setSelected(null)} onSave={saveDetail} onDelete={deleteDetail} onAddMilestone={addMilestone} />}
     {weekPicking && <WeekPicker semester={semester} week={week} currentWeek={currentAcademicWeek(semester.firstMonday)} onClose={() => setWeekPicking(false)} onSelect={(value) => { navigateWeek(value, true); setWeekPicking(false); }} />}
-    {importing && <ImportSheet state={state} onClose={() => setImporting(false)} onCommit={commitImport} />}
+    {importing && <ImportSheet state={state} initialSemesterId={importing} onClose={() => setImporting(false)} onCommit={commitImport} />}
     {toast && <div className="toast"><Check />{toast}</div>}
   </div>;
 }
