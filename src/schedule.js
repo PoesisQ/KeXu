@@ -218,27 +218,42 @@ export function groupOverlappingOccurrences(items) {
 }
 
 export function courseFingerprint(course) {
-  return `${course.title.trim().toLowerCase()}|${(course.teacher || '').trim().toLowerCase()}|${course.category || '理论'}`;
+  const source = String(course.relatedId || course.title || '').toLowerCase()
+    .replace(/[（(]\s*(?:实验|实践|实训|课程设计)\s*[)）]\s*$/u, '')
+    .replace(/(?:实验|实践|实训|课程设计)(?:课|课程)?\s*$/u, '')
+    .replace(/^\s*(?:实验|实践|实训)(?:课|课程)?[\s·:：-]+/u, '');
+  return source.replace(/[\s·:：()（）_-]/g, '');
+}
+
+function importedMeetingFingerprint(meeting) {
+  return [meeting.day, meeting.start, meeting.end, meeting.category || '', meeting.teacher || ''].join('|');
 }
 
 export function mergeImportedSemester(existing, imported) {
   if (!existing) return imported;
-  const oldByFingerprint = new Map(existing.courses.map((course) => [courseFingerprint(course), course]));
+  const oldByFingerprint = new Map();
+  existing.courses.forEach((course) => {
+    const fingerprint = courseFingerprint(course);
+    oldByFingerprint.set(fingerprint, [...(oldByFingerprint.get(fingerprint) || []), course]);
+  });
   const importedFingerprints = new Set(imported.courses.map(courseFingerprint));
   const merged = imported.courses.map((course) => {
-    const previous = oldByFingerprint.get(courseFingerprint(course));
-    if (!previous) return course;
+    const previousCourses = oldByFingerprint.get(courseFingerprint(course)) || [];
+    if (!previousCourses.length) return course;
+    const previous = previousCourses[0];
+    const previousMeetings = previousCourses.flatMap((item) => item.meetings || []);
+    const previousByMeeting = new Map(previousMeetings.map((meeting) => [importedMeetingFingerprint(meeting), meeting]));
     return {
       ...course,
       id: previous.id,
-      color: previous.color || course.color,
-      notes: previous.notes || '',
-      gradeComposition: previous.gradeComposition || '',
-      rollCall: previous.rollCall || '未知',
-      milestones: previous.milestones || [],
+      color: previousCourses.find((item) => item.color)?.color || course.color,
+      notes: previousCourses.find((item) => item.notes)?.notes || '',
+      gradeComposition: previousCourses.find((item) => item.gradeComposition)?.gradeComposition || '',
+      rollCall: previousCourses.find((item) => item.rollCall && item.rollCall !== '未知')?.rollCall || '未知',
+      milestones: previousCourses.flatMap((item) => item.milestones || []),
       meetings: course.meetings.map((meeting, index) => ({
         ...meeting,
-        id: previous.meetings[index]?.id || meeting.id
+        id: previousByMeeting.get(importedMeetingFingerprint(meeting))?.id || previousMeetings[index]?.id || meeting.id
       }))
     };
   });

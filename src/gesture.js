@@ -17,6 +17,12 @@ export function resolveWeekSwipe({ offset, velocity, width, canPrevious, canNext
   return direction;
 }
 
+export function resolveRevealSwipe({ offset, velocity, width = 76 }) {
+  const safeWidth = Math.max(1, Number(width) || 76);
+  const projected = Number(offset || 0) + Number(velocity || 0) * 140;
+  return projected <= -Math.min(30, safeWidth * 0.42);
+}
+
 export function horizontalPagerMotion(offset, width) {
   const safeWidth = Math.max(1, Number(width) || 1);
   const progress = Math.max(-1, Math.min(1, Number(offset) / safeWidth || 0));

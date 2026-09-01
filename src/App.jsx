@@ -20,9 +20,14 @@ import { useWeekPager } from './hooks/useWeekPager';
 import { useBackHandler } from './hooks/useBackHandler';
 import { backStack } from './backNavigation';
 import { groupBadgeLabel } from './presentation';
+import { pointerVelocity, resolveRevealSwipe } from './gesture';
 
 const TODAY = new Date();
-const SystemAppearance = registerPlugin('SystemAppearance');
+const SystemAppearance = globalThis.__kexuSystemAppearancePlugin
+  || (globalThis.__kexuSystemAppearancePlugin = registerPlugin('SystemAppearance'));
+const SEMESTER_WEEK_OPTIONS = Array.from({ length: 30 }, (_, index) => ({
+  value: String(index + 1), label: `${index + 1} 周`
+}));
 const shortDate = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' });
 function CardLocation({ value, context = '', lines = 2, className = 'card-location', icon = true }) {
   const text = String(value || '地点待定').trim();
@@ -104,7 +109,7 @@ function MonthCorner({ semester, week }) {
 
 function CourseCard({ item, week, locationMode, onOpen }) {
   const { course, meeting, active, kind, milestone } = item;
-  const lab = course.category === '实验';
+  const lab = (meeting.category || course.category) === '实验';
   const title = kind === 'milestone' ? `${milestone.type} · ${course.title}` : course.title;
   const locationLabel = displayLocation(meeting.location, locationMode);
   const locationLayout = cardLocationLayout(meeting.location, locationMode);
@@ -180,7 +185,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
       <span className="card-accent" />
       <span className="slot-count">{groupLabel}</span>
       <span className={`card-title ${/[A-Za-z]{4}/.test(course.title) ? 'english-title' : ''}`}>
-        {course.category === '实验' && <b className="type-tag">实验</b>}
+        {(meeting.category || course.category) === '实验' && <b className="type-tag">实验</b>}
         {course.title}
       </span>
       {!!inactiveItems.length && <span className="inactive-color-list compact" aria-hidden="true">
@@ -238,7 +243,7 @@ function SlotSheet({ group, week, locationMode, periods, onClose, onChoose }) {
         {ordered.map((item) => <button key={`${item.kind}-${item.course.id}-${item.meeting.id}`} onClick={() => onChoose(item)}>
           <i style={{ background: item.course.color }} />
           <span className="slot-course-main">
-            <span className="slot-course-title">{item.course.category === '实验' && <em>实验</em>}{item.kind === 'milestone' && <em>{item.milestone.type}</em>}{item.course.title}</span>
+            <span className="slot-course-title">{(item.meeting.category || item.course.category) === '实验' && <em>实验</em>}{item.kind === 'milestone' && <em>{item.milestone.type}</em>}{item.course.title}</span>
             <small>{formatWeekSpec(parseWeekSpec(item.meeting.weeks))} · 第{item.meeting.start}-{item.meeting.end}节 · {formatPeriodRange(item.meeting.start, item.meeting.end, periods)}</small>
             <small><MapPin size={12} />{displayLocation(item.meeting.location, locationMode)}</small>
           </span>
@@ -340,7 +345,7 @@ function DayAgenda({ semester, week, day, settings, overrides, onOpen }) {
           <button className="agenda-item" key={item.meeting.id} onClick={() => onOpen(item)}>
             <div className="agenda-time"><strong>{periods[item.meeting.start - 1][0]}</strong><span>{periods[item.meeting.end - 1][1]}</span></div>
             <i style={{ background: item.course.color }} />
-            <div className="agenda-main"><h3>{item.course.category === '实验' && <em>实验</em>}{item.kind === 'milestone' ? `${item.milestone.type} · ` : ''}{item.course.title}</h3><p><MapPin size={14} />{displayLocation(item.meeting.location, settings.locationMode)}</p><p><UserRound size={14} />{item.course.teacher || '教师待定'}</p></div>
+            <div className="agenda-main"><h3>{(item.meeting.category || item.course.category) === '实验' && <em>实验</em>}{item.kind === 'milestone' ? `${item.milestone.type} · ` : ''}{item.course.title}</h3><p><MapPin size={14} />{displayLocation(item.meeting.location, settings.locationMode)}</p><p><UserRound size={14} />{item.meeting.teacher || item.course.teacher || '教师待定'}</p></div>
             <ChevronRight size={19} />
           </button>
         ))}
@@ -365,6 +370,97 @@ function ChoiceSheet({ title, value, options, onSelect, onClose, eyebrow = '请�
           <span><b>{option.label}</b>{option.description && <small>{option.description}</small>}</span>
           <i>{option.value === value && <Check />}</i>
         </button>)}
+      </div>
+    </section>
+  </div>;
+}
+
+const SEMESTER_ACTION_WIDTH = 76;
+
+function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete }) {
+  const surfaceRef = useRef(null);
+  const gestureRef = useRef(null);
+  const suppressClickRef = useRef(false);
+  const applyOffset = useCallback((offset, animated) => {
+    if (!surfaceRef.current) return;
+    const transition = animated ? 'transform .38s cubic-bezier(.18,.82,.22,1)' : 'none';
+    const copy = surfaceRef.current.querySelector('.semester-swipe-copy');
+    surfaceRef.current.style.transition = transition;
+    surfaceRef.current.style.transform = `translate3d(${offset}px,0,0)`;
+    // A small opposing parallax keeps the semester name legible while the
+    // surface reveals its destructive action on narrow phones.
+    if (copy) {
+      copy.style.transition = transition;
+      copy.style.transform = `translate3d(${Math.min(SEMESTER_ACTION_WIDTH, Math.max(0, -offset))}px,0,0)`;
+    }
+  }, []);
+  useEffect(() => applyOffset(isOpen ? -SEMESTER_ACTION_WIDTH : 0, true), [applyOffset, isOpen]);
+  const finishGesture = (event) => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    const velocity = pointerVelocity(gesture.samples, 'x');
+    const shouldOpen = gesture.axis === 'horizontal'
+      ? resolveRevealSwipe({ offset: gesture.offset, velocity, width: SEMESTER_ACTION_WIDTH })
+      : isOpen;
+    onOpen(shouldOpen ? option.value : null);
+    applyOffset(shouldOpen ? -SEMESTER_ACTION_WIDTH : 0, true);
+    if (gesture.axis === 'horizontal') suppressClickRef.current = true;
+    gestureRef.current = null;
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch {}
+  };
+  return <div className={`semester-swipe-row ${selected ? 'selected' : ''} ${isOpen ? 'open' : ''}`}>
+    <button type="button" className="semester-delete-reveal" tabIndex={isOpen ? 0 : -1} aria-label={`删除学期 ${option.label}`} onClick={() => onDelete({ id: option.value, name: option.label })}><Trash2 /><span>删除</span></button>
+    <button
+      type="button"
+      ref={surfaceRef}
+      className="semester-swipe-surface"
+      onPointerDown={(event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        gestureRef.current = { x: event.clientX, y: event.clientY, startOffset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, offset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, axis: '', samples: [{ x: event.clientX, time: event.timeStamp }] };
+        suppressClickRef.current = false;
+      }}
+      onPointerMove={(event) => {
+        const gesture = gestureRef.current;
+        if (!gesture) return;
+        const dx = event.clientX - gesture.x;
+        const dy = event.clientY - gesture.y;
+        if (!gesture.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 6) gesture.axis = Math.abs(dx) > Math.abs(dy) * 1.18 ? 'horizontal' : 'vertical';
+        if (gesture.axis !== 'horizontal') return;
+        event.preventDefault();
+        try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
+        let offset = gesture.startOffset + dx;
+        if (offset > 0) offset *= 0.16;
+        if (offset < -SEMESTER_ACTION_WIDTH) offset = -SEMESTER_ACTION_WIDTH + (offset + SEMESTER_ACTION_WIDTH) * 0.14;
+        gesture.offset = offset;
+        gesture.samples.push({ x: event.clientX, time: event.timeStamp });
+        if (gesture.samples.length > 7) gesture.samples.shift();
+        applyOffset(offset, false);
+      }}
+      onPointerUp={finishGesture}
+      onPointerCancel={finishGesture}
+      onClick={(event) => {
+        if (suppressClickRef.current) { event.preventDefault(); suppressClickRef.current = false; return; }
+        if (isOpen) { onOpen(null); applyOffset(0, true); return; }
+        onSelect(option.value);
+      }}
+    >
+      <span className="semester-swipe-copy"><b>{option.label}</b><small>{option.description}</small></span>
+      <i>{selected && <Check />}</i>
+    </button>
+  </div>;
+}
+
+function SemesterChoiceSheet({ value, options, onSelect, onDelete, onClose }) {
+  const [openId, setOpenId] = useState(null);
+  useBackHandler(true, onClose);
+  useEffect(() => { if (openId && !options.some((option) => option.value === openId)) setOpenId(null); }, [openId, options]);
+  return <div className="modal-root" role="dialog" aria-modal="true" aria-label="选择学期">
+    <button className="modal-backdrop" aria-label="关闭选择" onClick={onClose} />
+    <section className="bottom-sheet choice-sheet semester-choice-sheet">
+      <div className="sheet-handle" />
+      <div className="sheet-heading"><div><span className="eyebrow">左滑学期可管理</span><h2>选择学期</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
+      <div className="semester-choice-list">
+        {options.map((option) => <SemesterSwipeRow key={option.value} option={option} selected={option.value === value} isOpen={openId === option.value} onOpen={setOpenId} onSelect={(nextValue) => { onSelect(nextValue); onClose(); }} onDelete={onDelete} />)}
       </div>
     </section>
   </div>;
@@ -504,16 +600,16 @@ function DetailSheet({ selected, semester, week, periods, overrides, onClose, on
     else onClose();
   });
   const [form, setForm] = useState(() => ({
-    title: course?.title || '', teacher: course?.teacher || '', credits: course?.credits || '',
-    category: course?.category || '理论', location: originalMeeting?.location || '', day: originalMeeting?.day || 1,
+    title: course?.title || '', teacher: originalMeeting?.teacher || course?.teacher || '', credits: course?.credits || '',
+    category: originalMeeting?.category || course?.category || '理论', location: originalMeeting?.location || '', day: originalMeeting?.day || 1,
     start: originalMeeting?.start || 1, end: originalMeeting?.end || originalMeeting?.start || 1,
     weeks: formatWeekSpec(parseWeekSpec(originalMeeting?.weeks || [week])).replace(/[第周]/g, '').replace(/、/g, ','),
     gradeComposition: course?.gradeComposition || '', rollCall: course?.rollCall || '未知', notes: course?.notes || '', color: course?.color || COLORS[0]
   }));
-  const [milestone, setMilestone] = useState({ type: course?.category === '实验' ? '答辩' : '考试', date: '', time: '09:00', location: originalMeeting?.location || '' });
+  const [milestone, setMilestone] = useState({ type: (originalMeeting?.category || course?.category) === '实验' ? '答辩' : '考试', date: '', time: '09:00', location: originalMeeting?.location || '' });
   const set = (name, value) => setForm((current) => ({ ...current, [name]: value }));
   const openPicker = (title, value, options, onSelect) => setPicker({ title, value: String(value), options, onSelect, eyebrow: '课程编辑' });
-  const typeOptions = ['理论', '实验', '实践'].map((value) => ({ value, label: value, description: value === '实验' ? '与同名理论课使用关联色' : '' }));
+  const typeOptions = ['理论', '实验', '实践'].map((value) => ({ value, label: value, description: value === '实验' ? '作为本课程的一项独立安排' : '' }));
   const dayOptions = WEEKDAYS.map((name, index) => ({ value: String(index + 1), label: `周${name}` }));
   const periodOptions = periods.map(([start, end], index) => ({ value: String(index + 1), label: `第 ${index + 1} 节`, description: `${start}–${end}` }));
   const rollCallOptions = ['未知', '不点名', '偶尔点名', '每次点名'].map((value) => ({ value, label: value }));
@@ -582,7 +678,7 @@ function ImportPreview({ courses, setCourses }) {
   const updateCourse = (index, patch) => setCourses((current) => current.map((course, courseIndex) => courseIndex === index ? { ...course, ...patch } : course));
   return <div className="import-preview">{courses.map((course, index) => <article key={course.id}>
     <i style={{ background: course.color }} />
-    <div><input className="preview-title" value={course.title} onChange={(e) => updateCourse(index, { title: e.target.value })} /><p>{course.teacher || '教师待识别'} · {course.credits ? `${course.credits} 学分` : '学分待识别'}{course.recognitionConfidence < 0.72 && <em className="confidence-badge">需核对</em>}</p>{course.recognitionNote && <small className="recognition-note">{course.recognitionNote}</small>}{course.meetings.map((meeting) => <span key={meeting.id}>周{WEEKDAYS[meeting.day - 1]} {meeting.start}-{meeting.end}节 · {formatWeekSpec(parseWeekSpec(meeting.weeks))}</span>)}</div>
+    <div><input className="preview-title" value={course.title} onChange={(e) => updateCourse(index, { title: e.target.value })} /><p>{course.teacher || '教师待识别'} · {course.credits ? `${course.credits} 学分` : '学分待识别'}{course.recognitionConfidence < 0.72 && <em className="confidence-badge">需核对</em>}</p>{course.recognitionNote && <small className="recognition-note">{course.recognitionNote}</small>}{course.meetings.map((meeting) => <span key={meeting.id}>{meeting.category || course.category || '理论'} · 周{WEEKDAYS[meeting.day - 1]} {meeting.start}-{meeting.end}节 · {formatWeekSpec(parseWeekSpec(meeting.weeks))}</span>)}</div>
     <button onClick={() => setCourses((current) => current.filter((_, courseIndex) => courseIndex !== index))}><X size={16} /></button>
   </article>)}</div>;
 }
@@ -596,6 +692,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
   const existing = state.semesters.find((item) => item.id === semesterId);
   const [semesterName, setSemesterName] = useState(existing?.name || suggestedSemesterName());
   const [firstMonday, setFirstMonday] = useState(existing?.firstMonday || mondayOfCurrentWeek());
+  const [weekCount, setWeekCount] = useState(existing?.weekCount || 20);
   const [courses, setCourses] = useState([]);
   const [rawText, setRawText] = useState('');
   const [method, setMethod] = useState('');
@@ -669,9 +766,11 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
     if (found) {
       setSemesterName(found.name);
       setFirstMonday(found.firstMonday);
+      setWeekCount(found.weekCount);
     } else {
       setSemesterName(suggestedSemesterName());
       setFirstMonday(mondayOfCurrentWeek());
+      setWeekCount(20);
     }
   };
   const semesterOptions = state.semesters.map((item) => ({ value: item.id, label: item.name, description: `${item.weekCount} 周 · ${item.courses.length} 门课程` }));
@@ -711,8 +810,9 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
               <button className={semesterId === 'new' ? 'active' : ''} onClick={() => chooseSemesterTarget('new')}>＋ 新建学期</button>
             </div>
             {semesterId !== 'new' && <PickerField label="已有学期" className="semester-existing" value={state.semesters.find((item) => item.id === semesterId)?.name || '选择学期'} onClick={() => setPicker({ title: '选择导入学期', value: semesterId, options: semesterOptions, onSelect: chooseSemesterTarget, eyebrow: '课表保存位置' })} />}
-            <Field label={semesterId === 'new' ? '新学期名称' : '学期名称'}><input value={semesterName} onChange={(e) => setSemesterName(e.target.value)} placeholder="2026-2027 第1学期" /></Field>
+            <Field label={semesterId === 'new' ? '新学期名称' : '学期名称'} className="semester-name"><input value={semesterName} onChange={(e) => setSemesterName(e.target.value)} placeholder="2026-2027 第1学期" /></Field>
             <Field label="第一周周一"><input type="date" value={firstMonday} onChange={(e) => setFirstMonday(e.target.value)} /></Field>
+            <PickerField label="学期周数" value={`${weekCount} 周`} onClick={() => setPicker({ title: '选择学期周数', value: String(weekCount), options: SEMESTER_WEEK_OPTIONS, onSelect: (value) => setWeekCount(Number(value)), eyebrow: '新学期范围' })} />
             {semesterId === 'new' && <p className="semester-target-note">导入后会创建独立学期，不会覆盖当前学期的课程和手动修改。</p>}
           </div>
           <ImportPreview courses={courses} setCourses={setCourses} />
@@ -722,7 +822,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
           {error && <p className="error-text">{error}</p>}
         </>}
       </div>
-      {step === 'review' && <div className="sheet-actions"><button className="secondary-button" onClick={() => { setPendingFiles(files); setStep('choose'); }}>重新选择</button><button className="primary-button" disabled={!courses.length || !firstMonday || !semesterName} onClick={() => onCommit({ semesterId, semesterName, firstMonday, courses })}>导入并合并</button></div>}
+      {step === 'review' && <div className="sheet-actions"><button className="secondary-button" onClick={() => { setPendingFiles(files); setStep('choose'); }}>重新选择</button><button className="primary-button" disabled={!courses.length || !firstMonday || !semesterName || !weekCount} onClick={() => onCommit({ semesterId, semesterName, firstMonday, weekCount, courses })}>导入并合并</button></div>}
     </section>
     {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
   </div>;
@@ -740,6 +840,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
   const settings = state.settings;
   const wallpaperInput = useRef(null);
   const [picker, setPicker] = useState(null);
+  const [semesterSheet, setSemesterSheet] = useState(false);
   const [timeSheet, setTimeSheet] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const update = (patch) => setState((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
@@ -765,7 +866,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
   return <>
   <main className="settings-view page-enter">
     <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>识别 PDF 或课表截图并合并到学期</small></span><ChevronRight /></button></div></section>
-    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => openPicker('选择学期', state.activeSemesterId, semesterOptions, onSemester)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button><button className="setting-action semester-delete-action" onClick={() => setDeleteTarget(state.semesters.find((item) => item.id === state.activeSemesterId))}><Trash2 /><span><b>删除当前学期</b><small>课程、日程和本学期修改会一并移除</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存，进入列表可左滑管理</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => setSemesterSheet(true)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>周课表显示</h2><div className="setting-card">
       <div className="setting-row"><div><b>地点显示</b><span>完整地址仍保留在详情中</span></div><SettingChoice value={labelFor(locationOptions, settings.locationMode)} onClick={() => openPicker('地点显示', settings.locationMode, locationOptions, (value) => update({ locationMode: value }))} /></div>
         <div className="setting-row"><div><b>课程卡片字号</b><span>课程名、标签和地点会一起调整</span></div><SettingChoice value={labelFor(fontSizeOptions, normalizeWeekFontSize(settings.weekFontSize))} onClick={() => openPicker('课程卡片字号', normalizeWeekFontSize(settings.weekFontSize), fontSizeOptions, (value) => update({ weekFontSize: normalizeWeekFontSize(value) }))} /></div>
@@ -802,6 +903,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
     <p className="version-note">{APP_NAME} {APP_VERSION} · 让摸鱼更高效，坐牢更舒心</p>
   </main>
   {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
+  {semesterSheet && <SemesterChoiceSheet value={state.activeSemesterId} options={semesterOptions} onSelect={onSemester} onDelete={setDeleteTarget} onClose={() => setSemesterSheet(false)} />}
   {timeSheet && <PeriodTimeSheet value={settings.periodTimes} onClose={() => setTimeSheet(false)} onSave={(periodTimes) => update({ periodTimes: normalizePeriodTimes(periodTimes) })} />}
   {deleteTarget && <ConfirmSheet title={`删除“${deleteTarget.name}”？`} description="此操作会永久删除该学期的课程、考试日程和逐周修改。若这是最后一个学期，KeXu 会保留一个空白新学期。" confirmLabel="确认删除" onClose={() => setDeleteTarget(null)} onConfirm={() => onDeleteSemester(deleteTarget.id)} />}
   </>;
@@ -1005,7 +1107,11 @@ export default function App() {
   const updateSemester = (updater) => setState((current) => ({ ...current, semesters: current.semesters.map((item) => item.id === semester.id ? updater(item) : item) }));
 
   const saveDetail = (form, scope) => {
-    const meetingPatch = { day: Number(form.day), start: Number(form.start), end: Math.max(Number(form.start), Number(form.end)), location: form.location, weeks: parseWeekSpec(form.weeks, semester.weekCount) };
+    const meetingPatch = {
+      day: Number(form.day), start: Number(form.start), end: Math.max(Number(form.start), Number(form.end)),
+      location: form.location, category: form.category, teacher: form.teacher,
+      weeks: parseWeekSpec(form.weeks, semester.weekCount)
+    };
     if (selected.isNew) {
       const courseId = uid('course');
       const relation = form.title.replace(/实验|实践|课程设计/g, '').trim();
@@ -1072,9 +1178,9 @@ export default function App() {
     setToast('已添加到课表');
   };
 
-  const commitImport = ({ semesterId, semesterName, firstMonday, courses }) => {
+  const commitImport = ({ semesterId, semesterName, firstMonday, weekCount, courses }) => {
     const targetId = semesterId === 'new' ? uid('semester') : semesterId;
-    const incoming = { id: targetId, name: semesterName, firstMonday, weekCount: 20, courses };
+    const incoming = { id: targetId, name: semesterName, firstMonday, weekCount: clamp(Number(weekCount) || 20, 1, 30), courses };
     setState((current) => {
       const existing = current.semesters.find((item) => item.id === targetId);
       const next = mergeImportedSemester(existing, incoming);

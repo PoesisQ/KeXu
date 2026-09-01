@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { cardLocationLayout, displayLocation, formatPeriodRange, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, normalizePeriodTimes, parseWeekSpec, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
-import { deepSeekErrorMessage, parseRecognizedText } from './importer';
+import { coalesceImportedCourses, deepSeekErrorMessage, parseRecognizedText } from './importer';
 import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
 import { loadState } from './storage';
-import { horizontalPagerMotion, pointerVelocity, resolveWeekSwipe, verticalMomentumDistance } from './gesture';
+import { horizontalPagerMotion, pointerVelocity, resolveRevealSwipe, resolveWeekSwipe, verticalMomentumDistance } from './gesture';
 import { groupBadgeLabel } from './presentation';
 
 describe('week specifications', () => {
@@ -87,6 +87,13 @@ describe('momentum gestures', () => {
     expect(verticalMomentumDistance(0.1)).toBe(0);
   });
 
+  it('opens swipe actions from either distance or a deliberate flick', () => {
+    expect(resolveRevealSwipe({ offset: -42, velocity: 0, width: 76 })).toBe(true);
+    expect(resolveRevealSwipe({ offset: -9, velocity: -0.45, width: 76 })).toBe(true);
+    expect(resolveRevealSwipe({ offset: -18, velocity: 0.2, width: 76 })).toBe(false);
+    expect(resolveRevealSwipe({ offset: -76, velocity: 0.7, width: 76 })).toBe(false);
+  });
+
   it('normalizes pager progress and moves the day highlight opposite the finger', () => {
     expect(horizontalPagerMotion(-195, 390)).toEqual({ progress: -0.5, amount: 0.5, next: 0.5, previous: 0, highlight: 0.5 });
     expect(horizontalPagerMotion(195, 390)).toEqual({ progress: 0.5, amount: 0.5, next: 0, previous: 0.5, highlight: -0.5 });
@@ -115,12 +122,23 @@ describe('imports', () => {
     expect(mergeImportedSemester(existing, imported).courses.map((course) => course.title)).toEqual(['示例课程', '健身']);
   });
 
-  it('does not merge same-name theory and lab courses back together', () => {
-    const imported = { courses: [
-      { id: 'theory', title: '示例课程', teacher: '陈老师', category: '理论', source: 'import', meetings: [] },
-      { id: 'lab', title: '示例课程', teacher: '陈老师', category: '实验', source: 'import', meetings: [] }
-    ] };
-    expect(mergeImportedSemester({ courses: [] }, imported).courses.map((course) => course.category)).toEqual(['理论', '实验']);
+  it('coalesces cross-day theory and lab rows into one course with separate arrangements', () => {
+    const [course] = coalesceImportedCourses([
+      { id: 'theory', title: '示例课程', teacher: '陈老师', category: '理论', source: 'import', meetings: [{ id: 'm1', day: 2, start: 1, end: 2, weeks: [1, 2], location: 'A101' }] },
+      { id: 'lab', title: '示例课程实验', teacher: '李老师', category: '实验', source: 'import', meetings: [{ id: 'm2', day: 3, start: 5, end: 6, weeks: [3, 4], location: 'Lab-2' }] }
+    ]);
+    expect(course.title).toBe('示例课程');
+    expect(course.meetings).toHaveLength(2);
+    expect(course.meetings.map((meeting) => meeting.category)).toEqual(['理论', '实验']);
+    expect(course.meetings.map((meeting) => meeting.teacher)).toEqual(['陈老师', '李老师']);
+  });
+
+  it('does not treat a real course name beginning with 实验 as a generic lab prefix', () => {
+    const courses = coalesceImportedCourses([
+      { id: 'a', title: '实验心理学', category: '理论', meetings: [{ id: 'a1', day: 1, start: 1, end: 2, weeks: [1], location: '' }] },
+      { id: 'b', title: '心理学', category: '理论', meetings: [{ id: 'b1', day: 2, start: 1, end: 2, weeks: [1], location: '' }] }
+    ]);
+    expect(courses.map((course) => course.title)).toEqual(['实验心理学', '心理学']);
   });
 
   it('keeps late classes and separates theory from lab meetings', () => {
@@ -134,13 +152,12 @@ describe('imports', () => {
 (2-4节)1-2周,7-8周,11-13周(单)/校区:示例校区/场地:A2-301/教师:陈老师/考核方式:考试/学分:3.5`;
     const courses = parseRecognizedText(text);
     const late = courses.find((course) => course.title === '创意编程实践');
-    const operatingSystems = courses.filter((course) => course.title === '示例课程');
+    const operatingSystems = courses.find((course) => course.title === '示例课程');
     expect(late.category).toBe('实验');
     expect(late.meetings[0]).toMatchObject({ day: 1, start: 9, end: 11 });
-    expect(operatingSystems.map((course) => course.category).sort()).toEqual(['实验', '理论']);
-    expect(operatingSystems.find((course) => course.category === '实验').meetings[0].day).toBe(3);
-    expect(operatingSystems.find((course) => course.category === '理论').meetings[0].weeks).toEqual([1, 2, 7, 8, 11, 13]);
-    expect(new Set(operatingSystems.map((course) => course.color)).size).toBe(1);
+    expect(operatingSystems.meetings.map((meeting) => meeting.category).sort()).toEqual(['实验', '理论']);
+    expect(operatingSystems.meetings.find((meeting) => meeting.category === '实验').day).toBe(3);
+    expect(operatingSystems.meetings.find((meeting) => meeting.category === '理论').weeks).toEqual([1, 2, 7, 8, 11, 13]);
   });
 });
 

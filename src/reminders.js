@@ -1,7 +1,8 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { DEFAULT_PERIODS, addDays, displayLocation, normalizePeriodTimes, parseWeekSpec, resolveMeeting } from './schedule';
 
-const ClassReminders = registerPlugin('ClassReminders');
+const ClassReminders = globalThis.__kexuClassRemindersPlugin
+  || (globalThis.__kexuClassRemindersPlugin = registerPlugin('ClassReminders'));
 
 function occurrenceTime(semester, week, day, period, periods = DEFAULT_PERIODS) {
   const date = addDays(semester.firstMonday, (week - 1) * 7 + day - 1);
@@ -25,8 +26,8 @@ export function buildReminderPayload(state, now = Date.now()) {
       if (notifyAt <= now || notifyAt > latest) return;
       reminders.push({
         id: `${semester.id}-${baseMeeting.id}-${week}`,
-        title: course.category === '实验' ? `实验 · ${course.title}` : course.title,
-        teacher: course.teacher || '教师待定',
+        title: (meeting.category || course.category) === '实验' ? `实验 · ${course.title}` : course.title,
+        teacher: meeting.teacher || course.teacher || '教师待定',
         location: displayLocation(meeting.location, 'full'),
         startClock: periods[meeting.start - 1][0],
         startAt,

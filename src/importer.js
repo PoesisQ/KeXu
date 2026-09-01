@@ -66,7 +66,70 @@ function extractNearby(block, label, fallback = '') {
 }
 
 function relationId(title) {
-  return title.toLowerCase().replace(/\s/g, '').replace(/实验|实践|实训|课程设计/g, '');
+  return canonicalCourseTitle(title).toLowerCase().replace(/[\s·:：()（）_-]/g, '');
+}
+
+function canonicalCourseTitle(value) {
+  const normalized = normalizeCourseTitle(String(value || '')).trim();
+  const withoutVariant = normalized
+    .replace(/[（(]\s*(?:实验|实践|实训|课程设计)\s*[)）]\s*$/u, '')
+    .replace(/(?:实验|实践|实训|课程设计)(?:课|课程)?\s*$/u, '')
+    .replace(/^\s*(?:实验|实践|实训)(?:课|课程)?[\s·:：-]+/u, '')
+    .trim();
+  return withoutVariant || normalized || '未命名课程';
+}
+
+function importedCourseIdentity(course) {
+  const source = String(course?.relatedId || '').trim() || canonicalCourseTitle(course?.title);
+  return canonicalCourseTitle(source).toLowerCase().replace(/[\s·:：()（）_-]/g, '');
+}
+
+function meetingIdentity(meeting) {
+  return [meeting.day, meeting.start, meeting.end, meeting.location || '', meeting.category || '', meeting.teacher || ''].join('|');
+}
+
+export function coalesceImportedCourses(inputCourses) {
+  const grouped = new Map();
+  (Array.isArray(inputCourses) ? inputCourses : []).forEach((sourceCourse) => {
+    if (!sourceCourse || !Array.isArray(sourceCourse.meetings) || !sourceCourse.meetings.length) return;
+    const identity = importedCourseIdentity(sourceCourse) || `course-${grouped.size}`;
+    const title = normalizeCourseTitle(sourceCourse.title || '未命名课程').trim();
+    const meetings = sourceCourse.meetings.map((meeting) => ({
+      ...meeting,
+      category: meeting.category || sourceCourse.category || '理论',
+      teacher: meeting.teacher || sourceCourse.teacher || ''
+    }));
+    const existing = grouped.get(identity);
+    if (!existing) {
+      grouped.set(identity, {
+        ...sourceCourse,
+        title,
+        relatedId: identity,
+        category: meetings.some((meeting) => meeting.category === '理论') ? '理论' : meetings[0].category,
+        teacher: sourceCourse.teacher || meetings.find((meeting) => meeting.teacher)?.teacher || '',
+        meetings: []
+      });
+    }
+    const target = grouped.get(identity);
+    if (title.length < target.title.length) target.title = title;
+    if (!target.teacher) target.teacher = sourceCourse.teacher || meetings.find((meeting) => meeting.teacher)?.teacher || '';
+    if (!target.credits && sourceCourse.credits) target.credits = sourceCourse.credits;
+    target.category = target.category === '理论' || meetings.some((meeting) => meeting.category === '理论') ? '理论' : target.category;
+    target.recognitionConfidence = Math.min(
+      Number(target.recognitionConfidence ?? 1),
+      Number(sourceCourse.recognitionConfidence ?? 1)
+    );
+    target.recognitionNote = [...new Set([target.recognitionNote, sourceCourse.recognitionNote].filter(Boolean))].join('；');
+    meetings.forEach((meeting) => {
+      const duplicate = target.meetings.find((current) => meetingIdentity(current) === meetingIdentity(meeting));
+      if (!duplicate) {
+        target.meetings.push(meeting);
+        return;
+      }
+      duplicate.weeks = [...new Set([...parseWeekSpec(duplicate.weeks), ...parseWeekSpec(meeting.weeks)])].sort((a, b) => a - b);
+    });
+  });
+  return [...grouped.values()];
 }
 
 function occurrenceCategory(title, location, assessment) {
@@ -126,12 +189,12 @@ export function parseRecognizedText(rawText) {
       };
       existing.meetings.push({
         id: id('meeting'), day, start: Number(match[1]), end: Number(match[2]),
-        weeks: parseWeekSpec(match[3]), location
+        weeks: parseWeekSpec(match[3]), location, category, teacher
       });
       courses.set(key, existing);
     }
   }
-  const result = [...courses.values()];
+  const result = coalesceImportedCourses([...courses.values()]);
   const relationColors = new Map();
   result.forEach((course) => {
     if (!relationColors.has(course.relatedId)) relationColors.set(course.relatedId, course.color);
@@ -387,7 +450,7 @@ export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = ()
 
 先在内部完成以下检查再输出：1. 找到星期列标题与节次/时间行锚点；2. 按课程色块的空间边界确定 day、start、end，跨行色块不能只取文字所在一行；3. 区分字段语义：课程名称通常是色块主标题，教师应是人名或带“教师/老师”的字段，学分是小数，地点包含校区/楼栋/教室，培养方案或备注不能当课程名；4. 将同一课程同一属性的重复安排合并；5. 检查晚间 9-12 节和图片衔接处是否遗漏。
 
-只输出 JSON：{"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}],"issues":[]}。day 为周一 1 到周日 7，节次为 1 到 12。同一课程的理论、实验或实践分别建 course，但 relatedId 相同；考核不是考试或地点为“未排地点”的安排优先判断为实验。英文课程名恢复单词空格。任何字段无法确定就留空，并在 recognitionNote 或 issues 说明，不要用相邻文字猜测教师或课程名。`
+只输出 JSON：{"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":"","category":"理论","teacher":""}]}],"issues":[]}。day 为周一 1 到周日 7，节次为 1 到 12。同名课程在周二、周三等多个时间上课时必须只建一个 course，并把每个时间分别放进 meetings；同一门课的理论、实验或实践也必须是一个 course 的不同 meeting，用 meeting.category 标明类型，不能拆成多门课。考核不是考试或地点为“未排地点”的安排优先判断为实验。英文课程名恢复单词空格。任何字段无法确定就留空，并在 recognitionNote 或 issues 说明，不要用相邻文字猜测教师或课程名。`
   }];
   let encodedSize = 0;
   for (let index = 0; index < files.length; index += 1) {
@@ -531,15 +594,12 @@ function normalizeAIResult(result) {
       id: id('meeting'), day: Math.min(7, Math.max(1, Number(meeting.day) || 1)),
       start: Math.min(12, Math.max(1, Number(meeting.start) || 1)),
       end: Math.min(12, Math.max(1, Number(meeting.end) || Number(meeting.start) || 1)),
-      weeks: parseWeekSpec(meeting.weeks), location: String(meeting.location || '')
+      weeks: parseWeekSpec(meeting.weeks), location: String(meeting.location || ''),
+      category: meeting.category === '实践' ? '实践' : /实验|实训|设计/.test(meeting.category || '') ? '实验' : category,
+      teacher: String(meeting.teacher || teacher)
     }))
   }); }).filter((course) => course.meetings.length);
-  const relationColors = new Map();
-  normalized.forEach((course) => {
-    if (!relationColors.has(course.relatedId)) relationColors.set(course.relatedId, course.color);
-    course.color = relationColors.get(course.relatedId);
-  });
-  return normalized;
+  return coalesceImportedCourses(normalized).map((course, courseIndex) => ({ ...course, color: COLORS[courseIndex % COLORS.length] }));
 }
 
 function modelQualityWarnings(result, courses) {
@@ -555,7 +615,7 @@ async function structureTextWithDeepSeek(rawText, apiKey, signal) {
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: '你是大学课表结构化与数据质检助手。输入是从 Word、Excel、PDF 文本层或纯文本直接提取的内容，不是 OCR 图片。利用字段标签、表头、行列标记和语义同时判断，绝不能把教师、专业描述、培养方案、考核说明或地点当作课程名。任何不确定字段留空并降低 confidence，不要猜测。只输出 JSON。' },
-      { role: 'user', content: `整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}],"issues":[]}。day 为周一1到周日7，节次1到12。必须检查第9-12节、跨页续写、同名理论与实验；英文课程名恢复单词空格。考核不是考试或地点是未排地点的安排优先作为实验。\n\n原始文档结构：\n${String(rawText || '').slice(0, 90000)}` }
+      { role: 'user', content: `整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":"","category":"理论","teacher":""}]}],"issues":[]}。day 为周一1到周日7，节次1到12。必须检查第9-12节、跨页续写和同一课程的多个安排。同名课程跨星期上课时只建一个 course；同一门课的理论与实验也只建一个 course，并在各 meeting.category 中标注类型。英文课程名恢复单词空格。考核不是考试或地点是未排地点的安排优先作为实验。\n\n原始文档结构：\n${String(rawText || '').slice(0, 90000)}` }
     ]
   }, apiKey, signal);
   const parsed = parseModelJson(data.choices?.[0]?.message?.content);
