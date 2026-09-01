@@ -83,7 +83,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .card-title { font-size: clamp(12.5px, 3.35vw, 15px); font-weight: 790; line-height: 1.16; letter-spacing: -.22px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; word-break: break-all; text-wrap: pretty; }
 .type-tag { display: inline-block; font-size: 8.5px; font-weight: 760; line-height: 14px; padding: 0 3px; background: color-mix(in srgb, var(--course) 76%, #65706a); color: white; border-radius: 5px; margin: 0 2px 2px 0; vertical-align: 1px; white-space: nowrap; }
 .type-tag.warm { background: #262722; }
-.card-location { width: calc(100% + 1px); margin-top: auto; padding: 1px 0 0; color: #35423d; font-size: clamp(10.2px, 2.7vw, 13px); line-height: 1.08; font-weight: 780; letter-spacing: -.5px; overflow: hidden; opacity: 1; text-align: left; overflow-wrap: anywhere; word-break: normal; transform: translateX(-1px); }
+.card-location { width: calc(100% + 1px); margin-top: auto; padding: 1px 0 0; color: #35423d; font-size: clamp(11px, 2.9vw, 13.5px); line-height: 1.08; font-weight: 780; letter-spacing: -.5px; overflow: hidden; opacity: 1; text-align: left; overflow-wrap: anywhere; word-break: normal; transform: translateX(-1px); }
 .card-location svg { display: none; vertical-align: -2px; margin-right: 1px; }
 .location-lines-2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 .location-lines-1 { display: block; white-space: nowrap; text-overflow: ellipsis; }
@@ -104,11 +104,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .slot-preview { font-size: 8.5px; line-height: 1.25; color: color-mix(in srgb, var(--course) 50%, #36413c); font-weight: 650; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; word-break: break-all; }
 .slot-group-card.inactive .slot-preview { color: #878c87; }
 .inactive-strip-card { padding: 6px 4px 5px 6px; gap: 4px; background: rgba(247,247,243,.78); color: #5f6661; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7), 0 3px 9px rgba(47,53,49,.045); }
-.inactive-strip-card .card-accent { background: color-mix(in srgb, var(--course) 58%, #46524c); opacity: .88; }
+.inactive-strip-card .card-accent { background: #626965; opacity: .86; }
 .inactive-strip-heading { align-self: flex-start; padding: 1px 4px; border-radius: 5px; background: rgba(255,255,255,.7); color: #858b86; font-size: 8px; font-weight: 720; line-height: 13px; white-space: nowrap; }
 .inactive-color-list { min-height: 0; width: 100%; display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 6px; }
 .inactive-color-strip { --strip-color: #aaa; display: block; width: 100%; min-height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--strip-color) 76%, white); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--strip-color) 34%, rgba(255,255,255,.74)), 0 2px 5px color-mix(in srgb, var(--strip-color) 14%, transparent); }
-.inactive-strip-location { margin-top: auto; width: 100%; overflow: hidden; color: #7c827d; font-size: 9.5px; line-height: 1.08; font-weight: 700; text-align: left; overflow-wrap: anywhere; word-break: normal; }
+.inactive-strip-location { margin-top: auto; width: 100%; overflow: hidden; color: #747b76; font-size: 10.2px; line-height: 1.08; font-weight: 720; text-align: left; overflow-wrap: anywhere; word-break: normal; }
 .inactive-group-card { padding-bottom: 6px; }
 .inactive-strip-more { color: #8b908b; font-size: 8px; line-height: 1.2; }
 .inactive-color-list.compact { flex: 0 1 auto; justify-content: flex-start; gap: 3px; }
@@ -320,14 +320,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-dark .toast { background: rgba(238,242,238,.96); color: #16201b; }
 
 @media (min-width: 600px) {
-  .card-title { font-size: 15px; }.card-location { font-size: 13px; }.card-location svg { display: inline; }
+  .card-title { font-size: 15px; }.card-location { font-size: 13.5px; }.card-location svg { display: inline; }
   .week-dates { left: 56px; }.month-corner-layer { width: 56px; }.period-rail { width: 56px; }.grid-surface,.course-columns { left: 56px; }
   .form-grid { grid-template-columns: repeat(4,1fr); }.form-grid .wide { grid-column: span 2; }.form-grid .wide:first-child { grid-column: span 3; }
 }
 
 @media (max-width: 390px) {
   .topbar { padding-left: 18px; padding-right: 12px; }.top-actions { gap: 3px; }.top-actions .icon-button { width: 35px; height: 35px; }.week-title { font-size: 22px; }
-  .course-card { left: 1px; right: 1px; padding: 6px 2px 6px 5px; border-radius: 9px; }.inactive-strip-card { padding-left: 6px; }.card-title { font-size: 12.4px; }.card-location { padding: 1px 0 0; font-size: 10.4px; }.active-dot { right: 3px; top: 3px; }
+  .course-card { left: 1px; right: 1px; padding: 6px 2px 6px 5px; border-radius: 9px; }.inactive-strip-card { padding-left: 6px; }.card-title { font-size: 12.4px; }.card-location { padding: 1px 0 0; font-size: 11.2px; }.active-dot { right: 3px; top: 3px; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }
