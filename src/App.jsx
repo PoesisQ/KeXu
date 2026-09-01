@@ -154,12 +154,7 @@ function WeekGrid({ semester, week, settings, overrides, onOpen, onAdd }) {
   const items = useMemo(() => occurrencesForWeek(semester, week, overrides)
     .filter((item) => !item.meeting.hidden && (settings.showInactive || item.active)), [semester, week, overrides, settings.showInactive]);
   const groups = useMemo(() => groupOverlappingOccurrences(items), [items]);
-  return (
-    <div className="week-scroll">
-      <div className="week-stage">
-        <div className="period-rail">
-          {PERIODS.map(([start, end], index) => <div className="period-label" key={start}><strong>{index + 1}</strong><span>{start}<br />{end}</span></div>)}
-        </div>
+  return <>
         <div className="grid-surface">
           {PERIODS.map((_, row) => Array.from({ length: 7 }, (_, day) => (
             <button aria-label={`周${WEEKDAYS[day]}第${row + 1}节添加`} className="empty-cell" key={`${row}-${day}`} onClick={() => onAdd(day + 1, row + 1)} />
@@ -176,9 +171,13 @@ function WeekGrid({ semester, week, settings, overrides, onOpen, onAdd }) {
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
+  </>;
+}
+
+function PeriodRail() {
+  return <div className="period-rail" aria-label="上课时间">
+    {PERIODS.map(([start, end], index) => <div className="period-label" key={start}><strong>{index + 1}</strong><span>{start}<br />{end}</span></div>)}
+  </div>;
 }
 
 function SlotSheet({ group, week, locationMode, onClose, onChoose }) {
@@ -208,13 +207,6 @@ function SlotSheet({ group, week, locationMode, onClose, onChoose }) {
   </div>;
 }
 
-function WeekPage({ semester, week, day, settings, overrides, onDay, onOpen, onAdd, className = '', style }) {
-  return <section className={`week-page ${className}`} style={style}>
-    <WeekDates semester={semester} week={week} selectedDay={day} onSelectDay={onDay} />
-    <WeekGrid semester={semester} week={week} settings={settings} overrides={overrides} onOpen={onOpen} onAdd={onAdd} />
-  </section>;
-}
-
 function WeekPicker({ semester, week, currentWeek, onSelect, onClose }) {
   useBackHandler(true, onClose);
   return <div className="modal-root" role="dialog" aria-modal="true" aria-label="选择周次">
@@ -237,26 +229,67 @@ function WeekPicker({ semester, week, currentWeek, onSelect, onClose }) {
   </div>;
 }
 
-function DayView({ semester, week, day, setDay, settings, overrides, onOpen, onAdd, onToday }) {
+function dayMetaForIndex(semester, index) {
+  if (index < 1 || index > semester.weekCount * 7) return null;
+  const week = Math.floor((index - 1) / 7) + 1;
+  const day = ((index - 1) % 7) + 1;
   const dates = datesForWeek(semester.firstMonday, week);
-  const viewingToday = toISODate(dates[day - 1]) === toISODate(TODAY);
+  return { index, week, day, date: dates[day - 1], dates };
+}
+
+function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday }) {
+  const current = dayMetaForIndex(semester, dayIndex);
+  const previous = dayMetaForIndex(semester, dayIndex - 1);
+  const next = dayMetaForIndex(semester, dayIndex + 1);
+  const boundaryPrevious = current.day === 1 ? previous : null;
+  const boundaryNext = current.day === 7 ? next : null;
+  const summaryPages = [{ slot: -1, meta: previous }, { slot: 0, meta: current }, { slot: 1, meta: next }];
+  const todayPages = [
+    { className: 'today-current', meta: current, interactive: true },
+    { className: 'today-previous', meta: previous, interactive: false },
+    { className: 'today-next', meta: next, interactive: false }
+  ];
+  const selectionPages = [
+    { className: 'selection-current', meta: current },
+    { className: 'selection-previous', meta: previous || current },
+    { className: 'selection-next', meta: next || current }
+  ];
+  const renderSelectionText = (meta, className) => <span className={`day-selection-text ${className}`} key={className}><small>{WEEKDAYS[meta.day - 1]}</small><b>{meta.date.getDate()}</b></span>;
+  const renderDateLabels = (dates) => <div className="day-strip-labels">
+    {dates.map((date, index) => <button type="button" key={toISODate(date)} aria-current={current.day === index + 1 ? 'date' : undefined} onClick={() => onSelectDate((current.week - 1) * 7 + index + 1)}><span>{WEEKDAYS[index]}</span><b>{date.getDate()}</b></button>)}
+  </div>;
+
+  return <section className="day-chrome">
+    <div className="day-hero">
+      <div className="day-summary-window" aria-live="polite">
+        {summaryPages.map(({ slot, meta }) => meta && <div className="day-summary-slide" key={meta.index} aria-hidden={slot !== 0} style={{ '--summary-base': `${slot * 100}%` }}><span>第{meta.week}周 · 周{WEEKDAYS[meta.day - 1]}</span><h1>{shortDate.format(meta.date)}</h1></div>)}
+      </div>
+      <div className="day-hero-actions">
+        <div className="today-control" aria-hidden={!onToday}>
+          {onToday && todayPages.map(({ className, meta, interactive }) => meta && toISODate(meta.date) !== toISODate(TODAY) && (interactive
+            ? <button className={`soft-button today-button today-visual ${className}`} key={className} onClick={onToday}><RotateCcw size={16} />回到今天</button>
+            : <span className={`soft-button today-button today-visual ${className}`} key={className} aria-hidden="true"><RotateCcw size={16} />回到今天</span>))}
+        </div>
+        <button className="soft-button" onClick={() => onAdd(current.day, 1)}><Plus size={18} />添加</button>
+      </div>
+    </div>
+    <div className="day-strip">
+      <span className={`day-selection ${boundaryPrevious ? 'leaving-previous' : ''} ${boundaryNext ? 'leaving-next' : ''}`} style={{ '--selection-base': `${(current.day - 1) * 100}%` }} aria-hidden="true">
+        {selectionPages.map(({ className, meta }) => renderSelectionText(meta, className))}
+      </span>
+      {boundaryPrevious && <span className="day-selection day-selection-wrap wrap-previous" style={{ '--selection-base': '700%' }} aria-hidden="true">{renderSelectionText(boundaryPrevious, 'selection-wrap-text')}</span>}
+      {boundaryNext && <span className="day-selection day-selection-wrap wrap-next" style={{ '--selection-base': '-100%' }} aria-hidden="true">{renderSelectionText(boundaryNext, 'selection-wrap-text')}</span>}
+      {renderDateLabels(current.dates)}
+    </div>
+  </section>;
+}
+
+function DayAgenda({ semester, week, day, settings, overrides, onOpen }) {
   const items = occurrencesForWeek(semester, week, overrides)
     .filter((item) => item.meeting.day === day && item.active && !item.meeting.hidden)
     .sort((a, b) => a.meeting.start - b.meeting.start);
-  return (
-    <main className="day-view">
-      <section className="day-hero">
-        <div><span>第{week}周 · 周{WEEKDAYS[day - 1]}</span><h1>{shortDate.format(dates[day - 1])}</h1></div>
-        <div className="day-hero-actions">
-          {!viewingToday && onToday && <button className="soft-button today-button" onClick={onToday}><RotateCcw size={16} />回到今天</button>}
-          <button className="soft-button" onClick={() => onAdd(day, 1)}><Plus size={18} />添加</button>
-        </div>
-      </section>
-      <div className="day-strip">
-        {dates.map((date, index) => <button className={day === index + 1 ? 'active' : ''} onClick={() => setDay(index + 1)} key={toISODate(date)}><span>{WEEKDAYS[index]}</span><b>{date.getDate()}</b></button>)}
-      </div>
-      <section className="agenda">
-        {!items.length && <div className="empty-day"><Sparkles /><h3>今天没有课</h3><p>留一点空白，也是一种安排。</p></div>}
+  return <section className="agenda">
+        {!items.length && <div className="empty-day"><Sparkles /><h3>这天没有课</h3><p>留一点空白，也是一种安排。</p></div>}
         {items.map((item) => (
           <button className="agenda-item" key={item.meeting.id} onClick={() => onOpen(item)}>
             <div className="agenda-time"><strong>{PERIODS[item.meeting.start - 1][0]}</strong><span>{PERIODS[item.meeting.end - 1][1]}</span></div>
@@ -265,14 +298,12 @@ function DayView({ semester, week, day, setDay, settings, overrides, onOpen, onA
             <ChevronRight size={19} />
           </button>
         ))}
-      </section>
-    </main>
-  );
+      </section>;
 }
 
-function DayPage({ semester, week, day, settings, overrides, onDay, onOpen, onAdd, onToday, className = '', style }) {
+function DayPage({ semester, week, day, settings, overrides, onOpen, className = '', style }) {
   return <section className={`day-page ${className}`} style={style}>
-    <DayView semester={semester} week={week} day={day} setDay={onDay} settings={settings} overrides={overrides} onOpen={onOpen} onAdd={onAdd} onToday={onToday} />
+    <DayAgenda semester={semester} week={week} day={day} settings={settings} overrides={overrides} onOpen={onOpen} />
   </section>;
 }
 
@@ -761,11 +792,23 @@ export default function App() {
       {...pointerHandlers}
       onClickCapture={(event) => { if (suppressClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
     >
-      {[-1, 0, 1].map((slot) => {
-        const pageWeek = week + slot;
-        if (pageWeek < 1 || pageWeek > semester.weekCount) return null;
-        return <WeekPage key={pageWeek} semester={semester} week={pageWeek} day={day} settings={state.settings} overrides={state.overrides} onDay={setDay} onOpen={slot === 0 ? ((value) => value.items ? openSlotGroup(value) : openOccurrence(value)) : () => {}} onAdd={addAt} className={`carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} style={{ '--page-base': `${slot * 100}%` }} />;
-      })}
+      <div className="week-dates-carousel">
+        {[-1, 0, 1].map((slot) => {
+          const pageWeek = week + slot;
+          if (pageWeek < 1 || pageWeek > semester.weekCount) return null;
+          return <section className={`week-date-page carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} key={pageWeek} style={{ '--page-base': `${slot * 100}%` }}><WeekDates semester={semester} week={pageWeek} selectedDay={day} onSelectDay={slot === 0 ? setDay : () => {}} /></section>;
+        })}
+      </div>
+      <div className="week-scroll">
+        <div className="week-stage">
+          {[-1, 0, 1].map((slot) => {
+            const pageWeek = week + slot;
+            if (pageWeek < 1 || pageWeek > semester.weekCount) return null;
+            return <section className={`week-body-page carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} key={pageWeek} style={{ '--page-base': `${slot * 100}%` }}><WeekGrid semester={semester} week={pageWeek} settings={state.settings} overrides={state.overrides} onOpen={slot === 0 ? ((value) => value.items ? openSlotGroup(value) : openOccurrence(value)) : () => {}} onAdd={slot === 0 ? addAt : () => {}} /></section>;
+          })}
+          <PeriodRail />
+        </div>
+      </div>
     </div>}
     {view === 'day' && <div
       className="day-pager"
@@ -773,14 +816,16 @@ export default function App() {
       {...dayPointerHandlers}
       onClickCapture={(event) => { if (suppressDayClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
     >
-      {[-1, 0, 1].map((slot) => {
-        const pageIndex = dayIndex + slot;
-        if (pageIndex < 1 || pageIndex > semester.weekCount * 7) return null;
-        const pageWeek = Math.floor((pageIndex - 1) / 7) + 1;
-        const pageDay = ((pageIndex - 1) % 7) + 1;
-        const selectDate = slot === 0 ? (nextDay) => navigateDate((pageWeek - 1) * 7 + nextDay, true) : () => {};
-        return <DayPage key={pageIndex} semester={semester} week={pageWeek} day={pageDay} settings={state.settings} overrides={state.overrides} onDay={selectDate} onOpen={slot === 0 ? openOccurrence : () => {}} onAdd={slot === 0 ? addAt : () => {}} onToday={returnToToday} className={`carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} style={{ '--page-base': `${slot * 100}%` }} />;
-      })}
+      <DayChrome semester={semester} dayIndex={dayIndex} onSelectDate={(nextIndex) => navigateDate(nextIndex, true)} onAdd={addAt} onToday={returnToToday} />
+      <div className="day-carousel-window">
+        {[-1, 0, 1].map((slot) => {
+          const pageIndex = dayIndex + slot;
+          if (pageIndex < 1 || pageIndex > semester.weekCount * 7) return null;
+          const pageWeek = Math.floor((pageIndex - 1) / 7) + 1;
+          const pageDay = ((pageIndex - 1) % 7) + 1;
+          return <DayPage key={pageIndex} semester={semester} week={pageWeek} day={pageDay} settings={state.settings} overrides={state.overrides} onOpen={slot === 0 ? openOccurrence : () => {}} className={`carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} style={{ '--page-base': `${slot * 100}%` }} />;
+        })}
+      </div>
     </div>}
     {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} reminderStatus={reminderStatus} />}
     <BottomNav view={view} setView={setView} />

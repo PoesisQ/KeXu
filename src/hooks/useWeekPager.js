@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { pointerVelocity, resolveWeekSwipe } from '../gesture';
+import { horizontalPagerMotion, pointerVelocity, resolveWeekSwipe } from '../gesture';
 
 const SETTLE_MS = 340;
 
@@ -16,7 +16,14 @@ export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart,
   const applyPagerOffset = useCallback((pixels) => {
     const pager = pagerRef.current;
     if (!pager) return;
+    const width = Math.max(1, pager.clientWidth || window.innerWidth);
+    const motion = horizontalPagerMotion(pixels, width);
     pager.style.setProperty('--drag-x', `${pixels}px`);
+    pager.style.setProperty('--drag-progress-pct', `${motion.progress * 100}%`);
+    pager.style.setProperty('--drag-amount', `${motion.amount}`);
+    pager.style.setProperty('--drag-next', `${motion.next}`);
+    pager.style.setProperty('--drag-previous', `${motion.previous}`);
+    pager.style.setProperty('--day-highlight-shift', `${motion.highlight * 100}%`);
   }, []);
 
   const setPagerOffset = useCallback((pixels, animate = false) => {
@@ -48,8 +55,8 @@ export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart,
     const pager = pagerRef.current;
     if (!pager) return;
     pager.classList.remove('settling', 'dragging');
-    pager.style.setProperty('--drag-x', '0px');
-  }, []);
+    applyPagerOffset(0);
+  }, [applyPagerOffset]);
 
   useEffect(() => resetPager, [resetPager]);
 
@@ -73,13 +80,13 @@ export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart,
       // Android WebView at the end of a swipe.
       flushSync(() => onWeekChange(next));
       if (pager) {
-        pager.style.setProperty('--drag-x', '0px');
+        applyPagerOffset(0);
         requestAnimationFrame(() => pager.classList.remove('committing'));
       }
       onTransitionEnd?.(next);
       settlingRef.current = false;
     }, SETTLE_MS + 20);
-  }, [onTransitionEnd, onTransitionStart, onWeekChange, setPagerOffset, week, weekCount]);
+  }, [applyPagerOffset, onTransitionEnd, onTransitionStart, onWeekChange, setPagerOffset, week, weekCount]);
 
   const navigateWeek = useCallback((value, absolute = false) => {
     if (settlingRef.current) return;

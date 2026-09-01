@@ -4,7 +4,7 @@ import { parseRecognizedText } from './importer';
 import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
 import { loadState } from './storage';
-import { pointerVelocity, resolveWeekSwipe, verticalMomentumDistance } from './gesture';
+import { horizontalPagerMotion, pointerVelocity, resolveWeekSwipe, verticalMomentumDistance } from './gesture';
 
 describe('week specifications', () => {
   it('parses ranges and parity', () => {
@@ -57,6 +57,13 @@ describe('momentum gestures', () => {
     expect(resolveWeekSwipe({ offset: 80, velocity: 1, width: 390, canPrevious: false, canNext: true })).toBe(0);
     expect(Math.abs(verticalMomentumDistance(10))).toBeLessThanOrEqual(560);
     expect(verticalMomentumDistance(0.1)).toBe(0);
+  });
+
+  it('normalizes pager progress and moves the day highlight opposite the finger', () => {
+    expect(horizontalPagerMotion(-195, 390)).toEqual({ progress: -0.5, amount: 0.5, next: 0.5, previous: 0, highlight: 0.5 });
+    expect(horizontalPagerMotion(195, 390)).toEqual({ progress: 0.5, amount: 0.5, next: 0, previous: 0.5, highlight: -0.5 });
+    expect(horizontalPagerMotion(-800, 390).progress).toBe(-1);
+    expect(horizontalPagerMotion(800, 0).progress).toBe(1);
   });
 });
 
