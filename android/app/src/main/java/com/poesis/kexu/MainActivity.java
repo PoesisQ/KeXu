@@ -2,13 +2,22 @@ package com.poesis.kexu;
 
 import com.getcapacitor.BridgeActivity;
 
+import android.view.View;
+import android.view.Window;
+
+import androidx.appcompat.app.ActionBar;
+
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
+        // Do not rely on Theme.SplashScreen's post-theme hand-off here. Affected
+        // OriginOS builds can retain its native title bar above the WebView.
+        setTheme(R.style.AppTheme_NoActionBar);
+        getWindow().requestFeature(Window.FEATURE_NO_TITLE);
         registerPlugin(ReminderPlugin.class);
         registerPlugin(SystemAppearancePlugin.class);
-        SystemBars.apply(this, SystemBars.storedDark(this), false);
         super.onCreate(savedInstanceState);
+        removeNativeActionBar();
         SystemBars.apply(this, SystemBars.storedDark(this), false);
         syncSystemBarsFromWeb();
     }
@@ -16,8 +25,19 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        removeNativeActionBar();
         SystemBars.apply(this, SystemBars.storedDark(this), false);
         syncSystemBarsFromWeb();
+    }
+
+    private void removeNativeActionBar() {
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) actionBar.hide();
+
+        // Defensive OEM fallback: hide an AppCompat action-bar container even if
+        // the vendor framework created it despite the NoActionBar theme.
+        View actionBarContainer = findViewById(androidx.appcompat.R.id.action_bar_container);
+        if (actionBarContainer != null) actionBarContainer.setVisibility(View.GONE);
     }
 
     private void syncSystemBarsFromWeb() {

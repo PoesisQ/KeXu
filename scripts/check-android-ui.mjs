@@ -7,6 +7,7 @@ const css = read('src/styles.css');
 const app = read('src/App.jsx');
 const mainActivity = read('android/app/src/main/java/com/poesis/kexu/MainActivity.java');
 const systemBars = read('android/app/src/main/java/com/poesis/kexu/SystemBars.java');
+const manifest = read('android/app/src/main/AndroidManifest.xml');
 const styles = read('android/app/src/main/res/values/styles.xml');
 const styles35 = read('android/app/src/main/res/values-v35/styles.xml');
 const viewport = read('index.html');
@@ -23,7 +24,8 @@ const checks = [
   ['Android 固定背景层降级', css.includes('.native-android.view-week .wallpaper') && css.includes('position: absolute')],
   ['状态栏与导航栏同步', systemBars.includes('setAppearanceLightStatusBars(!dark)') && systemBars.includes('setAppearanceLightNavigationBars(!dark)')],
   ['Android 15 非预期边到边防护', styles35.includes('windowOptOutEdgeToEdgeEnforcement')],
-  ['启动主题回落', styles.includes('postSplashScreenTheme')],
+  ['启动阶段不创建原生标题栏', manifest.includes('android:theme="@style/AppTheme.NoActionBar"') && !styles.includes('Theme.SplashScreen')],
+  ['运行时移除 OEM 标题栏', mainActivity.includes('getSupportActionBar()') && mainActivity.includes('action_bar_container')],
   ['安全区 viewport', viewport.includes('viewport-fit=cover')]
 ];
 
