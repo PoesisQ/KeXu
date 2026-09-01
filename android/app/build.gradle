@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file('signing.properties')
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+def hasKeXuSigning = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+    .every { signingProperties.getProperty(it) }
+
 android {
     namespace "com.poesis.kexu"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,8 +24,22 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasKeXuSigning) {
+            kexu {
+                storeFile file(signingProperties.getProperty('storeFile'))
+                storePassword signingProperties.getProperty('storePassword')
+                keyAlias signingProperties.getProperty('keyAlias')
+                keyPassword signingProperties.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
+        debug {
+            if (hasKeXuSigning) signingConfig signingConfigs.kexu
+        }
         release {
+            if (hasKeXuSigning) signingConfig signingConfigs.kexu
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

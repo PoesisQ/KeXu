@@ -6,6 +6,7 @@ android/.gradle/
 android/build/
 android/app/build/
 android/capacitor-cordova-android-plugins/
+android/signing.properties
 dist-apk/
 tmp/
 *.apk

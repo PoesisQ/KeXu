@@ -11,6 +11,8 @@ const manifest = read('android/app/src/main/AndroidManifest.xml');
 const styles = read('android/app/src/main/res/values/styles.xml');
 const styles35 = read('android/app/src/main/res/values-v35/styles.xml');
 const viewport = read('index.html');
+const buildGradle = read('android/app/build.gradle');
+const gitignore = read('.gitignore');
 
 const checks = [
   ['WebView 文字缩放锁定', css.includes('-webkit-text-size-adjust: 100%') && css.includes('text-size-adjust: 100%')],
@@ -26,6 +28,7 @@ const checks = [
   ['Android 15 非预期边到边防护', styles35.includes('windowOptOutEdgeToEdgeEnforcement')],
   ['启动阶段不创建原生标题栏', manifest.includes('android:theme="@style/AppTheme.NoActionBar"') && !styles.includes('Theme.SplashScreen')],
   ['运行时移除 OEM 标题栏', mainActivity.includes('getSupportActionBar()') && mainActivity.includes('action_bar_container')],
+  ['签名配置与源码解耦', buildGradle.includes("rootProject.file('signing.properties')") && gitignore.includes('android/signing.properties')],
   ['安全区 viewport', viewport.includes('viewport-fit=cover')]
 ];
 
