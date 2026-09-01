@@ -9,7 +9,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "SystemAppearance")
 public class SystemAppearancePlugin extends Plugin {
     @PluginMethod
-    public void apply(PluginCall call) {
+    public void setTheme(PluginCall call) {
         boolean dark = Boolean.TRUE.equals(call.getBoolean("dark", false));
         getActivity().runOnUiThread(() -> {
             SystemBars.apply(getActivity(), dark, true);

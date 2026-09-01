@@ -72,13 +72,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   --week-inactive-gap: 3px;
 }
 .app-shell.view-week, .app-shell.view-day { padding-bottom: 0; }
-.app-shell.native-android { --topbar-height: 76px; }
+.app-shell.native-android { --topbar-height: 82px; }
 .wallpaper { position: fixed; inset: 0; width: min(760px, 100%); margin: auto; background-repeat: no-repeat; background-color: #f7f3f1; pointer-events: none; transition: opacity .35s ease, filter .35s ease, transform .35s cubic-bezier(.2,.8,.2,1), background-position .3s ease, background-size .3s ease; }
 .wallpaper-wash { position: fixed; inset: 0; max-width: 760px; margin: auto; pointer-events: none; background: linear-gradient(180deg, rgba(252,249,247,.93) 0 150px, rgba(252,249,247,.2) 430px, rgba(252,249,247,.66) 100%); transition: opacity .28s ease; }
 .view-week .wallpaper-wash { background: linear-gradient(180deg, rgba(252,249,247,.95) 0 151px, rgba(252,249,247,.24) 280px, rgba(252,249,247,.48)); }
 
 .topbar { height: var(--topbar-height); padding: calc(23px + env(safe-area-inset-top)) 19px 14px 21px; display: flex; align-items: flex-end; justify-content: space-between; position: relative; z-index: 5; background: rgba(249,248,244,.78); backdrop-filter: blur(22px) saturate(120%); border-bottom: 1px solid var(--line); }
-.native-android .topbar { padding-top: 10px; }
+.native-android .topbar { padding: 10px 16px 11px 19px; background: #f7f3f1; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.native-android .brand-block { transform: translateY(2px); }
 .brand-block { display: flex; align-items: center; min-width: 0; transform: translateY(5px); }
 .week-heading { display: flex; align-items: center; gap: 8px; }
 .week-title { padding: 0; border: 0; background: none; display: flex; align-items: center; gap: 2px; font-size: 23px; line-height: 1.05; font-weight: 790; letter-spacing: -.5px; }
@@ -342,6 +343,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-dark .wallpaper-wash { background: linear-gradient(180deg, rgba(15,20,17,.95) 0 150px, rgba(15,20,17,.42) 430px, rgba(15,20,17,.72) 100%); }
 .theme-dark.view-week .wallpaper-wash { background: linear-gradient(180deg, rgba(15,20,17,.96) 0 151px, rgba(15,20,17,.35) 300px, rgba(15,20,17,.58)); }
 .theme-dark .topbar, .theme-dark .week-dates-carousel { background: rgba(18,24,20,.82); }
+.theme-dark.native-android .topbar { background: #101512; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .theme-dark .month-corner-layer { background: rgba(18,24,20,.94); }
 .theme-dark .icon-button { background: rgba(255,255,255,.07); }
 .theme-dark .icon-button.filled { background: #eef2ee; color: #17201c; }

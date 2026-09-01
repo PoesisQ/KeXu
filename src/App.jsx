@@ -675,7 +675,7 @@ export default function App() {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101512' : '#f7f3f1');
-    if (Capacitor.isNativePlatform()) SystemAppearance.apply({ dark }).catch(() => {});
+    if (Capacitor.isNativePlatform()) SystemAppearance.setTheme({ dark }).catch(() => {});
   }, [state.settings.theme]);
   useEffect(() => { previewWeekTitle(week); }, [previewWeekTitle, week]);
   useEffect(() => {

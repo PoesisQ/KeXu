@@ -11,4 +11,10 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         SystemBars.apply(this, SystemBars.storedDark(this), false);
     }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        SystemBars.apply(this, SystemBars.storedDark(this), false);
+    }
 }
