@@ -57,7 +57,6 @@ function WeekDates({ semester, week, selectedDay, onSelectDay }) {
   const dates = datesForWeek(semester.firstMonday, week);
   return (
     <div className="week-dates">
-      <div className="month-corner"><strong>{dates[0].getMonth() + 1}</strong><span>月</span></div>
       {dates.map((date, index) => {
         const isToday = toISODate(date) === toISODate(TODAY);
         return (
@@ -70,6 +69,22 @@ function WeekDates({ semester, week, selectedDay, onSelectDay }) {
       })}
     </div>
   );
+}
+
+function MonthCorner({ semester, week }) {
+  const monthAt = (targetWeek) => targetWeek >= 1 && targetWeek <= semester.weekCount
+    ? datesForWeek(semester.firstMonday, targetWeek)[0].getMonth() + 1
+    : null;
+  const current = monthAt(week);
+  const previous = monthAt(week - 1);
+  const next = monthAt(week + 1);
+  const previousChanges = previous !== null && previous !== current;
+  const nextChanges = next !== null && next !== current;
+  return <div className={`month-corner-layer ${previousChanges ? 'month-change-previous' : ''} ${nextChanges ? 'month-change-next' : ''}`} aria-live="polite">
+    <div className="month-corner-page month-current"><strong>{current}</strong><span>月</span></div>
+    {previousChanges && <div className="month-corner-page month-previous" aria-hidden="true"><strong>{previous}</strong><span>月</span></div>}
+    {nextChanges && <div className="month-corner-page month-next" aria-hidden="true"><strong>{next}</strong><span>月</span></div>}
+  </div>;
 }
 
 function CourseCard({ item, week, locationMode, onOpen }) {
@@ -798,6 +813,7 @@ export default function App() {
           if (pageWeek < 1 || pageWeek > semester.weekCount) return null;
           return <section className={`week-date-page carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} key={pageWeek} style={{ '--page-base': `${slot * 100}%` }}><WeekDates semester={semester} week={pageWeek} selectedDay={day} onSelectDay={slot === 0 ? setDay : () => {}} /></section>;
         })}
+        <MonthCorner semester={semester} week={week} />
       </div>
       <div className="week-scroll">
         <div className="week-stage">
