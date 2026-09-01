@@ -13,6 +13,7 @@ const styles35 = read('android/app/src/main/res/values-v35/styles.xml');
 const viewport = read('index.html');
 const buildGradle = read('android/app/build.gradle');
 const gitignore = read('.gitignore');
+const documentImporter = read('src/documentImporter.js');
 
 const checks = [
   ['WebView 文字缩放锁定', css.includes('-webkit-text-size-adjust: 100%') && css.includes('text-size-adjust: 100%')],
@@ -23,12 +24,14 @@ const checks = [
   ['主题同步到原生系统栏', app.includes('SystemAppearance.setTheme({ dark })') && mainActivity.includes('SystemAppearancePlugin.class')],
   ['Android 顶栏禁用 OEM 模糊合成', /\.native-android \.topbar[^}]+backdrop-filter: none/.test(css)],
   ['Android 顶栏使用显式文字颜色', /\.native-android \.week-title[^}]+-webkit-text-fill-color/.test(css)],
+  ['Android 加号使用显式 SVG 描边', /\.native-android \.top-actions \.icon-button\.filled svg[^}]+stroke: #fff/.test(css)],
   ['Android 固定背景层降级', css.includes('.native-android.view-week .wallpaper') && css.includes('position: absolute')],
   ['状态栏与导航栏同步', systemBars.includes('setAppearanceLightStatusBars(!dark)') && systemBars.includes('setAppearanceLightNavigationBars(!dark)')],
   ['Android 15 非预期边到边防护', styles35.includes('windowOptOutEdgeToEdgeEnforcement')],
   ['启动阶段不创建原生标题栏', manifest.includes('android:theme="@style/AppTheme.NoActionBar"') && !styles.includes('Theme.SplashScreen')],
   ['运行时移除 OEM 标题栏', mainActivity.includes('getSupportActionBar()') && mainActivity.includes('action_bar_container')],
   ['签名配置与源码解耦', buildGradle.includes("rootProject.file('signing.properties')") && gitignore.includes('android/signing.properties')],
+  ['文档解析器按需加载', documentImporter.includes("import('xlsx')") && documentImporter.includes("import('mammoth')")],
   ['安全区 viewport', viewport.includes('viewport-fit=cover')]
 ];
 

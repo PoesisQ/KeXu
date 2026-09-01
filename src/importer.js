@@ -1,14 +1,24 @@
-import * as pdfjs from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { COLORS } from './data';
+import { readDocumentFile } from './documentImporter';
 import { WEEKDAYS, parseWeekSpec } from './schedule';
+import { normalizeCourseTitle, restoreEnglishWordBoundaries } from './textNormalization';
 
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
+let pdfjsPromise;
+async function loadPdfJs() {
+  if (!pdfjsPromise) pdfjsPromise = Promise.all([
+    import('pdfjs-dist'),
+    import('pdfjs-dist/build/pdf.worker.min.mjs?url')
+  ]).then(([pdfjs, worker]) => {
+    pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+    return pdfjs;
+  });
+  return pdfjsPromise;
+}
 
 const id = (prefix = 'item') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 function normalizeText(text) {
-  return String(text || '')
+  return restoreEnglishWordBoundaries(String(text || '')
     .replace(/\r/g, '\n')
     .replace(/[－—–]/g, '-')
     .replace(/[，、]/g, ',')
@@ -19,18 +29,18 @@ function normalizeText(text) {
     .replace(/(\d)\s*[一~至]\s*(\d)/g, '$1-$2')
     .replace(/周\s*\n\s*\((单|双)\)/g, '周($1)')
     .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n');
+    .replace(/\n{3,}/g, '\n\n'));
 }
 
 function cleanTitle(value) {
-  return value
+  return normalizeCourseTitle(value
     .replace(/^.*学分\s*:?\s*\d+(?:\.\d+)?/g, '')
     .replace(/^.*总学时\s*:?\s*\d+/g, '')
     .replace(/^.*(?:星期[一二三四五六日]|节次)\s*/g, '')
     .replace(/^[\s,;:，。]+/g, '')
     .replace(/[\d\s|｜]+$/g, '')
-    .trim()
-    .slice(-36);
+    .trim())
+    .slice(-60);
 }
 
 function usefulTitle(value) {
@@ -92,7 +102,7 @@ export function parseRecognizedText(rawText) {
           }
           fragments.unshift(candidate);
         }
-        if (fragments.length) title = fragments.join('').slice(-36);
+        if (fragments.length) title = normalizeCourseTitle(fragments.join(' ')).slice(-60);
       }
       const context = lines.slice(lineIndex, lineIndex + 28).join('\n');
       const day = currentDay;
@@ -156,7 +166,18 @@ export async function pageText(page, knownHeaders = []) {
       if (!last || Math.abs(last.y - item.y) > 2.2) lines.push({ y: item.y, parts: [item] });
       else last.parts.push(item);
     });
-    return [header.text, ...lines.map((line) => line.parts.sort((a, b) => a.x - b.x).map((item) => item.text).join(''))].join('\n');
+    return [header.text, ...lines.map((line) => {
+      const parts = line.parts.sort((a, b) => a.x - b.x);
+      return parts.reduce((text, item, index) => {
+        if (!index) return item.text;
+        const previous = parts[index - 1];
+        const previousEnd = previous.x + previous.width;
+        const averageWidth = previous.width / Math.max(1, previous.text.length);
+        const gap = item.x - previousEnd;
+        const latinBoundary = /[A-Za-z0-9]$/.test(previous.text) && /^[A-Za-z0-9]/.test(item.text);
+        return `${text}${latinBoundary && gap > Math.max(.6, averageWidth * .16) ? ' ' : ''}${item.text}`;
+      }, '');
+    })].join('\n');
   });
   return { text: dayBlocks.join('\n\n'), dayBlocks, headers: headers.map(({ text, x, y }) => ({ text, x, y })) };
 }
@@ -197,7 +218,11 @@ export async function recognizeScheduleFile(file, onProgress = () => {}) {
   let rawText = '';
   let method = '本地 OCR';
   let pageCount = 1;
-  if (isPdf) {
+  const documentResult = await readDocumentFile(file, onProgress);
+  if (documentResult) {
+    ({ rawText, method, pageCount } = documentResult);
+  } else if (isPdf) {
+    const pdfjs = await loadPdfJs();
     const bytes = new Uint8Array(await file.arrayBuffer());
     const document = await pdfjs.getDocument({
       data: bytes,
@@ -231,7 +256,7 @@ export async function recognizeScheduleFile(file, onProgress = () => {}) {
       }
       rawText = ocrParts.join('\n\n');
     }
-  } else {
+  } else if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(file.name)) {
     const image = new Image();
     image.src = URL.createObjectURL(file);
     await image.decode();
@@ -241,7 +266,7 @@ export async function recognizeScheduleFile(file, onProgress = () => {}) {
     canvas.getContext('2d').drawImage(image, 0, 0);
     rawText = await ocrCanvas(canvas, (progress) => onProgress({ stage: 'ocr', page: 1, total: 1, progress }));
     URL.revokeObjectURL(image.src);
-  }
+  } else throw new Error('暂不支持这种文件格式');
   return { rawText, courses: parseRecognizedText(rawText), method, pageCount };
 }
 
@@ -249,7 +274,7 @@ function normalizeAIResult(result) {
   const courses = Array.isArray(result?.courses) ? result.courses : [];
   const normalized = courses.map((course, courseIndex) => ({
     id: id('course'),
-    title: String(course.title || '未命名课程'),
+    title: normalizeCourseTitle(course.title || '未命名课程'),
     teacher: String(course.teacher || ''),
     credits: String(course.credits || ''),
     color: COLORS[courseIndex % COLORS.length],
@@ -280,7 +305,7 @@ export async function refineWithDeepSeek(rawText, apiKey) {
       model: 'deepseek-chat', temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: '你是大学课表结构化助手。只输出 JSON。不要臆造 OCR 中没有的信息。必须逐条排课判断：考核方式不是“考试”，或者场地为“未排地点”的排课写为实验；其余写为理论。同名课程同时含理论和实验排课时拆成两个 course，但 title 可以相同，relatedId 必须相同。不能遗漏第9-12节或跨页续写的排课。' },
+        { role: 'system', content: '你是大学课表结构化助手。只输出 JSON。不要臆造识别文本中没有的信息。英文课程名必须恢复正确的单词空格，例如 ComputerNetwork 写为 Computer Network、DigitalLogicCircuits 写为 Digital Logic Circuits。必须逐条排课判断：考核方式不是“考试”，或者场地为“未排地点”的排课写为实验；其余写为理论。同名课程同时含理论和实验排课时拆成两个 course，但 title 可以相同，relatedId 必须相同。不能遗漏第9-12节或跨页续写的排课。' },
         { role: 'user', content: `把下面 OCR 文本整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}]}。day 为周一1到周日7，节次1到12，完整保留校区和场地。\n\n${rawText.slice(0, 60000)}` }
       ]
     })

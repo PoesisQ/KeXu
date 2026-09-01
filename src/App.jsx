@@ -7,6 +7,7 @@ import {
   Settings2, Sparkles, Trash2, Upload, UserRound, X
 } from 'lucide-react';
 import { COLORS, normalizeWeekFontSize } from './data';
+import { IMPORT_ACCEPT } from './importFormats';
 import { APP_NAME, APP_VERSION, backupFileName } from './config';
 import {
   PERIODS, WEEKDAYS, addDays, cardLocationLayout, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
@@ -131,7 +132,7 @@ function CourseCard({ item, week, locationMode, onOpen }) {
       onClick={(event) => { event.stopPropagation(); onOpen(item); }}
     >
       <span className="card-accent" />
-      <span className="card-title">
+      <span className={`card-title ${/[A-Za-z]{4}/.test(title) ? 'english-title' : ''}`}>
         {lab && <b className="type-tag">实验</b>}
         {kind === 'milestone' && <b className="type-tag warm">{milestone.type}</b>}
         {title}
@@ -178,7 +179,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
     >
       <span className="card-accent" />
       <span className="slot-count">{groupLabel}</span>
-      <span className="card-title">
+      <span className={`card-title ${/[A-Za-z]{4}/.test(course.title) ? 'english-title' : ''}`}>
         {course.category === '实验' && <b className="type-tag">实验</b>}
         {course.title}
       </span>
@@ -513,13 +514,13 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
       <div className="sheet-heading"><div><span className="eyebrow">智能导入</span><h2>{step === 'review' ? `确认 ${courses.length} 门课程` : '从课表开始'}</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
       <div className="sheet-scroll">
         {step === 'choose' && <>
-          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>PDF 或课表截图都可以</h3><p>优先读取文本；遇到乱码 PDF 会自动切换本地中文 OCR。原文件不会上传。</p></div>
+          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>课表文件或截图都可以</h3><p>支持 PDF、图片、Excel、CSV/TSV、Word DOCX 与常见纯文本文档；解析器只在选择文件后加载，原文件不会上传。</p></div>
           {initialSemesterId === 'new' && <div className="new-semester-intent"><Plus /><div><b>将创建一个独立新学期</b><span>识别完成后设置学期名称与第一周周一。</span></div></div>}
-          <button className="drop-zone" onClick={() => fileInput.current?.click()}><Upload /><span>选择课表文件</span><small>PDF · PNG · JPG</small></button>
-          <input hidden ref={fileInput} type="file" accept="application/pdf,image/*" onChange={(e) => e.target.files[0] && begin(e.target.files[0])} />
+          <button className="drop-zone" onClick={() => fileInput.current?.click()}><Upload /><span>选择课表文件</span><small>PDF / 图片 · Excel / CSV · DOCX / TXT / MD / JSON</small></button>
+          <input hidden ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => e.target.files[0] && begin(e.target.files[0])} />
           {error && <p className="error-text">{error}</p>}
         </>}
-        {step === 'reading' && <div className="reading-state"><div className="scan-animation"><FileScan /><i /></div><h3>{progress?.stage === 'ai' ? 'DeepSeek 正在整理字段' : progress?.stage === 'ocr' ? `正在识别第 ${progress.page}/${progress.total} 页` : '正在读取课表结构'}</h3><p>{file?.name}</p><div className="progress"><i style={{ width: `${Math.max(8, (progress?.progress || 0.1) * 100)}%` }} /></div><small>首次使用本地 OCR 时会下载免费的中文识别模型</small></div>}
+        {step === 'reading' && <div className="reading-state"><div className="scan-animation"><FileScan /><i /></div><h3>{progress?.stage === 'ai' ? 'DeepSeek 正在整理字段' : progress?.stage === 'ocr' ? `正在识别第 ${progress.page}/${progress.total} 页` : progress?.stage === 'document' ? '正在读取文档结构' : '正在读取课表结构'}</h3><p>{file?.name}</p><div className="progress"><i style={{ width: `${Math.max(8, (progress?.progress || 0.1) * 100)}%` }} /></div><small>{progress?.stage === 'ocr' ? '首次使用本地 OCR 时会下载免费的中文识别模型' : '解析仅在本次导入期间运行'}</small></div>}
         {step === 'review' && <>
           <div className="recognition-summary"><Check /><div><b>{method}</b><span>请确认课程名、周次和地点后再保存</span></div></div>
           <div className="semester-form">

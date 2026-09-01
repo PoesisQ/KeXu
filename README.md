@@ -12,7 +12,7 @@
 
 KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 应用。它希望把“导入、查看、修改、提醒”这条最常用的路径做得足够快、清楚且可控，而不是把课表塞进社交、成绩查询或内容社区中。
 
-当前版本：`0.9.15`
+当前版本：`0.9.16`
 
 ## 设计原则
 
@@ -68,8 +68,8 @@ KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 
 
 - 课程按学期隔离保存，并记录第一周周一。
 - 设置页提供“新建学期并导入”入口；识别完成后可明确选择合并到已有学期或创建独立新学期。
-- 内置 PDF 文本层读取、Adobe 中文 CMap、页面坐标解析和本地 Tesseract OCR。
-- 支持 PDF、PNG 和 JPG。
+- 内置 PDF 文本层读取、Adobe 中文 CMap、页面坐标解析和本地 Tesseract OCR；识别后会恢复常见英文课程名的单词边界。
+- 支持 PDF、PNG/JPG/WebP、Excel（XLSX/XLS/XLSM/XLSB/ODS）、CSV/TSV、Word DOCX，以及 TXT/Markdown/JSON/LOG；旧版二进制 DOC 需先另存为 DOCX。
 - 识别课程名、教师、学分、周次、星期、节次和地点，并区分理论课与实验课。
 - 重新导入时合并已有学期，保留手动课程、课程详情、里程碑和用户修改。
 - 可选 DeepSeek API 仅用于用户主动触发的 OCR 文本结构化校对。
@@ -95,10 +95,11 @@ KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 
 - Capacitor 7 / Android
 - Vitest
 - PDF.js、Tesseract.js
+- SheetJS、Mammoth.js
 - vite-plugin-pwa
 - 原生 Java 通知与 AlarmManager 调度
 
-PDF/OCR 模块采用动态导入，不进入日常查看课表的首屏加载路径。
+PDF、OCR、Excel 和 Word 解析器均采用动态导入，只在用户选择相应文件时加载，不进入日常查看课表的首屏执行路径。
 
 ## 项目结构
 
@@ -123,7 +124,9 @@ KeXu/
 │  ├─ config.js                  # 应用名与版本
 │  ├─ data.js                    # 去标识化演示学期及默认设置
 │  ├─ gesture.js                 # 可测试的速度/惯性纯函数
-│  ├─ importer.js                # PDF、OCR、DeepSeek 结构化
+│  ├─ importer.js                # 导入编排、PDF/OCR、DeepSeek 结构化
+│  ├─ documentImporter.js        # 按需 Excel、CSV、DOCX 与文本解析
+│  ├─ textNormalization.js       # 中英文课程名清洗与词界恢复
 │  ├─ presentation.js            # 课程卡片文案等显示纯函数
 │  ├─ reminders.js               # 提醒数据构建及原生桥接
 │  ├─ schedule.js                # 周次、日期、课程合并与显示逻辑

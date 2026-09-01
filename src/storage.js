@@ -1,4 +1,5 @@
 import { BUNDLED_SEMESTERS, COLORS, makeInitialState, normalizeWeekFontSize } from './data';
+import { normalizeCourseTitle } from './textNormalization';
 
 const STORAGE_KEY = 'kexu-state-v1';
 
@@ -6,7 +7,7 @@ function normalizeCourse(course) {
   if (!course || typeof course !== 'object') return null;
   return {
     ...course,
-    title: String(course.title || '未命名课程'),
+    title: course.source === 'import' ? normalizeCourseTitle(course.title || '未命名课程') : String(course.title || '未命名课程'),
     meetings: Array.isArray(course.meetings) ? course.meetings.filter((meeting) => meeting && typeof meeting === 'object') : [],
     milestones: Array.isArray(course.milestones) ? course.milestones.filter((item) => item && typeof item === 'object') : []
   };

@@ -23,6 +23,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .app-shell {
   --topbar-height: 96px;
   --week-card-title-size: clamp(13.2px, 3.38vw, 15.5px);
+  --week-card-english-title-size: clamp(11.7px, 3vw, 13.7px);
   --week-card-title-leading: 1.15;
   --week-card-tag-size: 9px;
   --week-card-tag-leading: 15px;
@@ -42,6 +43,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .app-shell.week-font-compact {
   --week-card-title-size: clamp(12.3px, 3.15vw, 14.3px);
+  --week-card-english-title-size: clamp(10.9px, 2.8vw, 12.7px);
   --week-card-title-leading: 1.17;
   --week-card-tag-size: 8.3px;
   --week-card-tag-leading: 14px;
@@ -55,6 +57,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .app-shell.week-font-large {
   --week-card-title-size: clamp(14px, 3.59vw, 16.5px);
+  --week-card-english-title-size: clamp(12.4px, 3.18vw, 14.6px);
   --week-card-title-leading: 1.12;
   --week-card-tag-size: 9.7px;
   --week-card-tag-leading: 16px;
@@ -85,9 +88,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .native-android .brand-block { transform: translateY(2px); }
 .native-android .week-title { color: #303431; -webkit-text-fill-color: #303431; opacity: 1; }
 .native-android .semester-caption { color: #767c78; -webkit-text-fill-color: #767c78; opacity: 1; }
-.native-android .top-actions, .native-android .top-actions svg { color: #303431; opacity: 1; }
-.native-android .top-actions .icon-button { background: #fff; color: #303431; -webkit-text-fill-color: #303431; opacity: 1; }
-.native-android .top-actions .icon-button.filled { background: #303431; color: #fff; -webkit-text-fill-color: #fff; }
+.native-android .top-actions { color: #303431; opacity: 1; }
+.native-android .top-actions .icon-button { background: #fff; color: #303431; opacity: 1; }
+.native-android .top-actions .icon-button svg { display: block; color: inherit; stroke: currentColor; fill: none; opacity: 1; }
+.native-android .top-actions .icon-button.filled { background: #303431; color: #fff; }
+.native-android .top-actions .icon-button.filled svg { color: #fff; stroke: #fff; }
 .brand-block { display: flex; align-items: center; min-width: 0; transform: translateY(5px); }
 .week-heading { display: flex; align-items: center; gap: 8px; }
 .week-title { padding: 0; border: 0; background: none; display: flex; align-items: center; gap: 2px; font-size: 23px; line-height: 1.05; font-weight: 790; letter-spacing: -.5px; }
@@ -141,7 +146,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .course-card { --course: #86c4ff; pointer-events: auto; position: absolute; left: 1.5px; right: 1.5px; overflow: hidden; border: 0; border-radius: 11px; padding: var(--week-card-padding-y) 4px var(--week-card-padding-y) 6px; text-align: left; display: flex; flex-direction: column; gap: var(--week-card-gap); background: color-mix(in srgb, var(--course) 47%, rgba(255,255,255,.94)); color: #29332f; box-shadow: 0 4px 13px rgba(55,63,58,.08), inset 0 0 0 1px rgba(255,255,255,.5); cursor: pointer; transition: transform .18s cubic-bezier(.2,.8,.2,1), filter .18s ease, opacity .25s ease; z-index: 2; }
 .course-card:active { transform: scale(.95); filter: saturate(1.08); z-index: 5; }
 .card-accent { position: absolute; inset: 0 auto 0 0; width: 3px; background: color-mix(in srgb, var(--course) 72%, white); opacity: 1; }
-.card-title { flex: 0 0 auto; font-size: var(--week-card-title-size); font-weight: 790; line-height: var(--week-card-title-leading); letter-spacing: -.24px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; word-break: break-all; text-wrap: pretty; }
+.card-title { flex: 0 0 auto; font-size: var(--week-card-title-size); font-weight: 790; line-height: var(--week-card-title-leading); letter-spacing: -.24px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; word-break: normal; overflow-wrap: anywhere; text-wrap: pretty; }
+.card-title.english-title { font-family: Arial, Inter, "HarmonyOS Sans SC", system-ui, sans-serif; font-size: var(--week-card-english-title-size); line-height: 1.12; letter-spacing: -.12px; }
 .course-card[data-periods="1"] .card-title { -webkit-line-clamp: 1; }
 .course-card[data-periods="2"] .card-title { -webkit-line-clamp: 3; }
 .slot-group-card[data-periods="2"] .card-title { -webkit-line-clamp: 2; }
@@ -357,6 +363,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-dark.native-android .top-actions, .theme-dark.native-android .top-actions svg { color: #eef2ee; }
 .theme-dark.native-android .top-actions .icon-button { background: #202824; color: #eef2ee; -webkit-text-fill-color: #eef2ee; }
 .theme-dark.native-android .top-actions .icon-button.filled { background: #eef2ee; color: #17201c; -webkit-text-fill-color: #17201c; }
+.theme-dark.native-android .top-actions .icon-button.filled svg { color: #17201c; stroke: #17201c; }
 .theme-dark .month-corner-layer { background: rgba(18,24,20,.94); }
 .theme-dark .icon-button { background: rgba(255,255,255,.07); }
 .theme-dark .icon-button.filled { background: #eef2ee; color: #17201c; }
