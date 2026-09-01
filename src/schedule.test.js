@@ -170,8 +170,18 @@ describe('demo state and reminders', () => {
     const migrated = loadState();
     delete globalThis.localStorage;
     const migratedCurrent = migrated.semesters.find((semester) => semester.id === current.id);
-    expect(migrated.version).toBe(5);
+    expect(migrated.version).toBe(6);
     expect(migratedCurrent.courses.some((course) => course.id === 'manual-reading')).toBe(true);
+  });
+
+  it('does not silently restore a bundled semester after the user deletes it', () => {
+    const saved = makeInitialState();
+    saved.semesters = [{ id: 'kept', name: '保留学期', firstMonday: '2026-09-07', weekCount: 18, courses: [] }];
+    saved.activeSemesterId = 'kept';
+    globalThis.localStorage = { getItem: () => JSON.stringify(saved) };
+    const loaded = loadState();
+    delete globalThis.localStorage;
+    expect(loaded.semesters.map((semester) => semester.id)).toEqual(['kept']);
   });
 
   it('recovers from malformed nested saved data instead of crashing', () => {

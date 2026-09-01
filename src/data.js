@@ -65,7 +65,7 @@ export const BUNDLED_SEMESTERS = [demoSemester];
 
 export function makeInitialState() {
   return {
-    version: 5,
+    version: 6,
     activeSemesterId: demoSemester.id,
     semesters: BUNDLED_SEMESTERS,
     overrides: {},

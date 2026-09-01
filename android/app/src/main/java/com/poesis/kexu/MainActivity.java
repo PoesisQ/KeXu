@@ -28,6 +28,10 @@ public class MainActivity extends BridgeActivity {
         removeNativeActionBar();
         SystemBars.apply(this, SystemBars.storedDark(this), false);
         syncSystemBarsFromWeb();
+        // Returning from the exact-alarm or battery settings screen is not
+        // guaranteed to emit a WebView visibility event on every OEM build.
+        // Rebuild the saved schedule here so newly granted access takes effect.
+        ReminderScheduler.rescheduleStored(this);
     }
 
     private void removeNativeActionBar() {

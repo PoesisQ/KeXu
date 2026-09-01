@@ -1,5 +1,5 @@
 export const APP_NAME = 'KeXu';
-export const APP_VERSION = '0.9.17';
+export const APP_VERSION = '0.9.18';
 
 export function backupFileName(date) {
   return `${APP_NAME}-backup-${date}.json`;

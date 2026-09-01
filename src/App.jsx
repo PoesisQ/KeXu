@@ -15,7 +15,7 @@ import {
   normalizePeriodTimes, resolveMeeting, shouldForceRoomWrap, splitMeetingFromWeek, toISODate
 } from './schedule';
 import { exportState, loadState, saveState } from './storage';
-import { getReminderStatus, openReminderSettings, remindersAvailable, requestReminderAccess, syncNativeReminders } from './reminders';
+import { getReminderStatus, openBatterySettings, openReminderSettings, remindersAvailable, requestReminderAccess, sendTestReminder, syncNativeReminders } from './reminders';
 import { useWeekPager } from './hooks/useWeekPager';
 import { useBackHandler } from './hooks/useBackHandler';
 import { backStack } from './backNavigation';
@@ -370,6 +370,20 @@ function ChoiceSheet({ title, value, options, onSelect, onClose, eyebrow = '请�
   </div>;
 }
 
+function ConfirmSheet({ title, description, confirmLabel, onConfirm, onClose }) {
+  useBackHandler(true, onClose);
+  return <div className="modal-root nested-modal" role="dialog" aria-modal="true" aria-label={title}>
+    <button className="modal-backdrop" aria-label="取消" onClick={onClose} />
+    <section className="bottom-sheet confirm-sheet">
+      <div className="sheet-handle" />
+      <div className="confirm-sheet-icon"><Trash2 /></div>
+      <h2>{title}</h2>
+      <p>{description}</p>
+      <div className="sheet-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="danger-button" onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</button></div>
+    </section>
+  </div>;
+}
+
 function SettingChoice({ value, onClick }) {
   return <button type="button" className="select-trigger" onClick={onClick}><span>{value}</span><ChevronDown /></button>;
 }
@@ -568,7 +582,7 @@ function ImportPreview({ courses, setCourses }) {
   const updateCourse = (index, patch) => setCourses((current) => current.map((course, courseIndex) => courseIndex === index ? { ...course, ...patch } : course));
   return <div className="import-preview">{courses.map((course, index) => <article key={course.id}>
     <i style={{ background: course.color }} />
-    <div><input className="preview-title" value={course.title} onChange={(e) => updateCourse(index, { title: e.target.value })} /><p>{course.teacher || '教师待识别'} · {course.credits ? `${course.credits} 学分` : '学分待识别'}</p>{course.meetings.map((meeting) => <span key={meeting.id}>周{WEEKDAYS[meeting.day - 1]} {meeting.start}-{meeting.end}节 · {formatWeekSpec(parseWeekSpec(meeting.weeks))}</span>)}</div>
+    <div><input className="preview-title" value={course.title} onChange={(e) => updateCourse(index, { title: e.target.value })} /><p>{course.teacher || '教师待识别'} · {course.credits ? `${course.credits} 学分` : '学分待识别'}{course.recognitionConfidence < 0.72 && <em className="confidence-badge">需核对</em>}</p>{course.recognitionNote && <small className="recognition-note">{course.recognitionNote}</small>}{course.meetings.map((meeting) => <span key={meeting.id}>周{WEEKDAYS[meeting.day - 1]} {meeting.start}-{meeting.end}节 · {formatWeekSpec(parseWeekSpec(meeting.weeks))}</span>)}</div>
     <button onClick={() => setCourses((current) => current.filter((_, courseIndex) => courseIndex !== index))}><X size={16} /></button>
   </article>)}</div>;
 }
@@ -576,6 +590,7 @@ function ImportPreview({ courses, setCourses }) {
 function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) {
   const [step, setStep] = useState('choose');
   const [files, setFiles] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const [recognitionMode, setRecognitionMode] = useState(state.settings.apiKey ? 'vision' : 'local');
   const [semesterId, setSemesterId] = useState(initialSemesterId === 'new' ? 'new' : state.activeSemesterId);
   const existing = state.semesters.find((item) => item.id === semesterId);
@@ -605,11 +620,26 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
     else close();
   });
 
-  const begin = async (chosenFiles) => {
+  const isImage = (file) => Boolean(file?.type?.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file?.name || ''));
+  const addFiles = (chosenFiles) => {
+    const incoming = Array.from(chosenFiles || []).filter(Boolean);
+    if (!incoming.length) return;
+    setError('');
+    const combined = [...pendingFiles, ...incoming];
+    if (combined.length > 1 && !combined.every(isImage)) {
+      setError('多次追加仅支持课表图片；PDF、Word、Excel 或文本请单独导入。');
+      if (!pendingFiles.length) setPendingFiles([incoming[0]]);
+      return;
+    }
+    const unique = combined.filter((file, index, list) => list.findIndex((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified) === index);
+    if (unique.length > 8) setError('最多保留前 8 张图片；可以删除不需要的截图后再添加。');
+    setPendingFiles(unique.slice(0, 8));
+  };
+  const begin = async (chosenFiles = pendingFiles) => {
     const selectedFiles = Array.from(chosenFiles || []).slice(0, 8);
     if (!selectedFiles.length) return;
-    if (recognitionMode === 'vision' && !state.settings.apiKey && selectedFiles.every((item) => item.type.startsWith('image/'))) {
-      setError('视觉版面识别需要先在“我的”页面填写 DeepSeek API Key；也可以切换到免费本地 OCR。');
+    if (recognitionMode === 'vision' && !state.settings.apiKey) {
+      setError('DeepSeek 精确识别需要先在“我的”页面填写 API Key；也可以切换到免费本地解析。');
       return;
     }
     const controller = new AbortController();
@@ -626,9 +656,12 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
   };
   const aiRefine = async () => {
     if (!state.settings.apiKey) { setError('请先在“我的”页面保存 DeepSeek API Key'); return; }
+    const controller = new AbortController();
+    abortRef.current = controller;
     setStep('reading'); setProgress({ stage: 'ai', page: 1, total: 1, progress: 0.65 });
-    try { const { refineWithDeepSeek } = await import('./importer'); setCourses(await refineWithDeepSeek(rawText, state.settings.apiKey)); setMethod('本地 OCR + DeepSeek 结构化'); setStep('review'); }
-    catch (reason) { setError(reason.message); setStep('review'); }
+    try { const { refineWithDeepSeek } = await import('./importer'); setCourses(await refineWithDeepSeek(rawText, state.settings.apiKey, controller.signal)); setMethod('本地结果 + DeepSeek 结构化'); setStep('review'); }
+    catch (reason) { if (reason?.name !== 'AbortError') setError(reason.message); setStep('review'); }
+    finally { if (abortRef.current === controller) abortRef.current = null; }
   };
   const chooseSemesterTarget = (value) => {
     setSemesterId(value);
@@ -656,15 +689,16 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
       <div className="sheet-heading"><div><span className="eyebrow">智能导入</span><h2>{step === 'review' ? `确认 ${courses.length} 门课程` : '从课表开始'}</h2></div><IconButton label="关闭" onClick={close}><X /></IconButton></div>
       <div className="sheet-scroll">
         {step === 'choose' && <>
-          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>完整课表或连续截图都可以</h3><p>图片可一次选择最多 8 张，并按选择顺序联合识别。PDF、Excel、Word 与文本仍在本地按需解析。</p></div>
+          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>完整课表或连续截图都可以</h3><p>图片最多追加 8 张并按顺序联合识别；文档先在本地抽取结构，再由所选模式整理，不会把 Word 当图片做 OCR。</p></div>
           {initialSemesterId === 'new' && <div className="new-semester-intent"><Plus /><div><b>将创建一个独立新学期</b><span>识别完成后设置学期名称与第一周周一。</span></div></div>}
-          <div className="recognition-mode" role="group" aria-label="图片识别方式">
-            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>视觉版面识别</b><small>理解行列与跨图衔接 · 需 DeepSeek 余额</small></span></button>
-            <button type="button" className={recognitionMode === 'local' ? 'active' : ''} onClick={() => setRecognitionMode('local')}><FileScan /><span><b>免费本地 OCR</b><small>不上传图片 · 复杂版面能力有限</small></span></button>
+          <div className="recognition-mode" role="group" aria-label="课表识别方式">
+            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>DeepSeek 精确识别</b><small>图片理解版面 · 文档直接整理文本结构</small></span></button>
+            <button type="button" className={recognitionMode === 'local' ? 'active' : ''} onClick={() => setRecognitionMode('local')}><FileScan /><span><b>免费本地解析</b><small>文档读取文本 · 图片使用 OCR</small></span></button>
           </div>
-          <button className="drop-zone" onClick={() => fileInput.current?.click()}><Upload /><span>选择课表文件或多张截图</span><small>图片可多选 · PDF / Excel / CSV · DOCX / TXT / MD / JSON</small></button>
-          <input hidden multiple ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => { if (e.target.files.length) begin(e.target.files); e.target.value = ''; }} />
-          {recognitionMode === 'vision' && <p className="privacy-note">视觉模式会把本次选中的图片发送给 DeepSeek；识别结束后 KeXu 不保留图片副本。</p>}
+          <button className={`drop-zone ${pendingFiles.length ? 'compact-drop-zone' : ''}`} onClick={() => fileInput.current?.click()}><Upload /><span>{pendingFiles.length ? '继续添加图片' : '选择课表文件或截图'}</span><small>{pendingFiles.length ? '即使手机每次只能选择一张，也可以重复添加' : 'PDF / 图片 / Excel / CSV / DOCX / TXT / MD / JSON'}</small></button>
+          <input hidden multiple ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => { if (e.target.files.length) addFiles(e.target.files); e.target.value = ''; }} />
+          {pendingFiles.length > 0 && <div className="pending-files"><div className="pending-files-title"><b>{pendingFiles.every(isImage) ? `${pendingFiles.length} 张截图，按下列顺序联合识别` : '已选择文件'}</b><button onClick={() => setPendingFiles([])}>清空</button></div>{pendingFiles.map((file, index) => <div className="pending-file" key={`${file.name}-${file.size}-${file.lastModified}`}><i>{index + 1}</i><span><b>{file.name}</b><small>{Math.max(1, Math.round(file.size / 1024))} KB</small></span><button aria-label={`移除 ${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X /></button></div>)}<button className="primary-button start-recognition" onClick={() => begin()}>开始识别{pendingFiles.length > 1 ? ` ${pendingFiles.length} 张图片` : ''}</button></div>}
+          {recognitionMode === 'vision' && <p className="privacy-note">图片会发送给 DeepSeek 视觉模型；Word、Excel、PDF 文本层只发送提取出的文字与表格结构，不经过 OCR。识别结束后 KeXu 不保留文件副本。</p>}
           {error && <p className="error-text">{error}</p>}
         </>}
         {step === 'reading' && <div className="reading-state"><div className={`scan-animation ${progress?.stage?.startsWith('vision') ? 'vision-scan' : ''}`}>{progress?.stage?.startsWith('vision') ? <Sparkles /> : <FileScan />}<i /></div><h3>{readingTitle}</h3><p>{files.map((item) => item.name).join(' · ')}</p><div className="progress"><i style={{ width: `${Math.max(5, Math.min(100, (progress?.progress || 0.02) * 100))}%` }} /></div><small>{progress?.detail || (progress?.stage === 'ocr' ? '首次使用会下载免费的中文识别模型，请保持应用在前台' : '解析器只在本次导入期间运行')} · {elapsed} 秒</small><button className="cancel-reading" onClick={cancelReading}>取消识别</button></div>}
@@ -688,7 +722,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
           {error && <p className="error-text">{error}</p>}
         </>}
       </div>
-      {step === 'review' && <div className="sheet-actions"><button className="secondary-button" onClick={() => setStep('choose')}>重新选择</button><button className="primary-button" disabled={!courses.length || !firstMonday || !semesterName} onClick={() => onCommit({ semesterId, semesterName, firstMonday, courses })}>导入并合并</button></div>}
+      {step === 'review' && <div className="sheet-actions"><button className="secondary-button" onClick={() => { setPendingFiles(files); setStep('choose'); }}>重新选择</button><button className="primary-button" disabled={!courses.length || !firstMonday || !semesterName} onClick={() => onCommit({ semesterId, semesterName, firstMonday, courses })}>导入并合并</button></div>}
     </section>
     {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
   </div>;
@@ -702,11 +736,12 @@ async function compressWallpaper(file) {
   return canvas.toDataURL('image/jpeg', 0.82);
 }
 
-function SettingsView({ state, setState, onOpenImport, onSemester, onReminderToggle, onOpenPermissions, reminderStatus }) {
+function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemester, onReminderToggle, onOpenPermissions, onOpenBattery, onTestReminder, reminderStatus }) {
   const settings = state.settings;
   const wallpaperInput = useRef(null);
   const [picker, setPicker] = useState(null);
   const [timeSheet, setTimeSheet] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const update = (patch) => setState((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
   const downloadBackup = () => { const url = URL.createObjectURL(exportState(state)); const anchor = document.createElement('a'); anchor.href = url; anchor.download = backupFileName(toISODate(TODAY)); anchor.click(); URL.revokeObjectURL(url); };
   const locationOptions = [
@@ -730,7 +765,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
   return <>
   <main className="settings-view page-enter">
     <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>识别 PDF 或课表截图并合并到学期</small></span><ChevronRight /></button></div></section>
-    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => openPicker('选择学期', state.activeSemesterId, semesterOptions, onSemester)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => openPicker('选择学期', state.activeSemesterId, semesterOptions, onSemester)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button><button className="setting-action semester-delete-action" onClick={() => setDeleteTarget(state.semesters.find((item) => item.id === state.activeSemesterId))}><Trash2 /><span><b>删除当前学期</b><small>课程、日程和本学期修改会一并移除</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>周课表显示</h2><div className="setting-card">
       <div className="setting-row"><div><b>地点显示</b><span>完整地址仍保留在详情中</span></div><SettingChoice value={labelFor(locationOptions, settings.locationMode)} onClick={() => openPicker('地点显示', settings.locationMode, locationOptions, (value) => update({ locationMode: value }))} /></div>
         <div className="setting-row"><div><b>课程卡片字号</b><span>课程名、标签和地点会一起调整</span></div><SettingChoice value={labelFor(fontSizeOptions, normalizeWeekFontSize(settings.weekFontSize))} onClick={() => openPicker('课程卡片字号', normalizeWeekFontSize(settings.weekFontSize), fontSizeOptions, (value) => update({ weekFontSize: normalizeWeekFontSize(value) }))} /></div>
@@ -741,8 +776,9 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
     <section className="settings-group"><h2>上课提醒</h2><div className="setting-card">
       <div className="setting-row"><div><b>课前提醒与倒计时</b><span>通知中直接显示课程、时间和完整地址</span></div><button className={`switch ${settings.remindersEnabled ? 'on' : ''}`} onClick={() => onReminderToggle(!settings.remindersEnabled)}><i /></button></div>
       <div className="setting-row"><div><b>提前时间</b><span>默认在上课前 10 分钟提醒</span></div><SettingChoice value={labelFor(reminderOptions, settings.reminderMinutes)} onClick={() => openPicker('提前提醒', settings.reminderMinutes, reminderOptions, (value) => update({ reminderMinutes: Number(value) }))} /></div>
-      <div className="originos-note"><BellRing /><div><b>系统通知状态</b><span>{remindersAvailable() ? (!reminderStatus?.notifications ? '通知权限尚未开启，请前往系统权限设置。' : reminderStatus?.exactAlarms ? `通知与精确闹钟已就绪${Number.isFinite(reminderStatus?.count) ? `，已安排 ${reminderStatus.count} 个提醒` : ''}。` : '通知已开启；请允许“闹钟和提醒”以避免系统延迟。') : '安装 Android APK 后可用；原子岛呈现方式由 vivo 机型与 OriginOS 版本决定。'}</span></div></div>
+      <div className="originos-note"><BellRing /><div><b>系统通知状态</b><span>{remindersAvailable() ? (!reminderStatus?.notifications ? '通知总权限尚未开启。' : reminderStatus?.channelEnabled === false ? '“上课提醒”通知渠道已被系统关闭。' : reminderStatus?.backgroundRestricted ? '应用处于严格后台限制，Android 可能完全不触发闹钟。' : !reminderStatus?.exactAlarms ? '通知已开启，但精确闹钟未授权，提醒可能延迟。' : `通知与精确闹钟已就绪${reminderStatus?.batteryOptimized ? '；系统仍在优化 KeXu 的后台耗电，建议设为不限制' : ''}${Number.isFinite(reminderStatus?.count) ? `；已安排 ${reminderStatus.count} 个提醒` : ''}${reminderStatus?.nextNotifyAt ? `；下次 ${new Date(reminderStatus.nextNotifyAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}${reminderStatus?.lastTriggeredAt ? `；最近触发 ${new Date(reminderStatus.lastTriggeredAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}。`) : '安装 Android APK 后可用；原子岛呈现方式由 vivo 机型与 OriginOS 版本决定。'}</span></div></div>
       <button className="permission-link" onClick={onOpenPermissions}><Settings2 /><span><b>打开系统权限设置</b><small>通知、闹钟与提醒、后台运行</small></span><ChevronRight /></button>
+      <div className="reminder-tools"><button onClick={onTestReminder}><BellRing />发送测试通知</button><button onClick={onOpenBattery}><Settings2 />检查后台限制</button></div>
     </div></section>
     <section className="settings-group"><h2>壁纸</h2><div className="setting-card wallpaper-settings">
       <button className="wallpaper-pick" onClick={() => wallpaperInput.current?.click()}>{settings.wallpaper ? <img src={settings.wallpaper} style={{ objectFit: settings.wallpaperFit === 'stretch' ? 'fill' : settings.wallpaperFit === 'cover' ? 'cover' : 'contain', objectPosition: `${settings.wallpaperPositionX}% ${settings.wallpaperPositionY}%` }} /> : <ImageIcon />}<span>{settings.wallpaper ? '更换壁纸' : '选择壁纸'}</span></button>
@@ -767,6 +803,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
   </main>
   {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
   {timeSheet && <PeriodTimeSheet value={settings.periodTimes} onClose={() => setTimeSheet(false)} onSave={(periodTimes) => update({ periodTimes: normalizePeriodTimes(periodTimes) })} />}
+  {deleteTarget && <ConfirmSheet title={`删除“${deleteTarget.name}”？`} description="此操作会永久删除该学期的课程、考试日程和逐周修改。若这是最后一个学期，KeXu 会保留一个空白新学期。" confirmLabel="确认删除" onClose={() => setDeleteTarget(null)} onConfirm={() => onDeleteSemester(deleteTarget.id)} />}
   </>;
 }
 
@@ -866,8 +903,27 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', refresh);
   }, [state.settings.remindersEnabled]);
   useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return undefined;
+    let disposed = false;
+    let listener;
+    NativeApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) return;
+      getReminderStatus().then(setReminderStatus).catch(() => {});
+      if (state.settings.remindersEnabled) {
+        syncNativeReminders(state).then((result) => setReminderStatus((current) => ({ ...current, ...result }))).catch(() => {});
+      }
+    }).then((handle) => {
+      if (disposed) handle.remove();
+      else listener = handle;
+    });
+    return () => {
+      disposed = true;
+      listener?.remove();
+    };
+  }, [state]);
+  useEffect(() => {
     syncNativeReminders(state).then((result) => setReminderStatus((current) => ({ ...current, ...result }))).catch(() => {});
-  }, [state.semesters, state.overrides, state.settings.remindersEnabled, state.settings.reminderMinutes]);
+  }, [state.semesters, state.overrides, state.settings.remindersEnabled, state.settings.reminderMinutes, state.settings.periodTimes]);
 
   const toggleReminders = async (enabled) => {
     if (enabled) {
@@ -889,6 +945,41 @@ export default function App() {
     } catch {
       setToast('暂时无法打开系统设置');
     }
+  };
+
+  const testReminder = async () => {
+    try {
+      const currentStatus = await getReminderStatus();
+      if (!currentStatus?.notifications) await requestReminderAccess();
+      const result = await sendTestReminder();
+      setReminderStatus((current) => ({ ...current, ...result }));
+      setToast(result?.delivered ? '测试通知已发送' : '测试通知未能显示，请检查通知渠道');
+    } catch (reason) {
+      setToast(reason?.message || '测试通知发送失败');
+    }
+  };
+
+  const openBattery = async () => {
+    try {
+      await openBatterySettings();
+      setToast('请将 KeXu 的后台耗电设为允许或不限制');
+    } catch {
+      setToast('暂时无法打开后台设置');
+    }
+  };
+
+  const deleteSemester = (semesterId) => {
+    setState((current) => {
+      const removed = current.semesters.find((item) => item.id === semesterId);
+      if (!removed) return current;
+      const meetingIds = new Set((removed.courses || []).flatMap((course) => (course.meetings || []).map((meeting) => meeting.id)));
+      let semesters = current.semesters.filter((item) => item.id !== semesterId);
+      if (!semesters.length) semesters = [{ id: uid('semester'), name: '新学期', firstMonday: mondayOfCurrentWeek(), weekCount: 20, courses: [] }];
+      const activeSemesterId = current.activeSemesterId === semesterId ? semesters[0].id : current.activeSemesterId;
+      const overrides = Object.fromEntries(Object.entries(current.overrides || {}).filter(([key]) => ![...meetingIds].some((id) => key.startsWith(`${id}@`))));
+      return { ...current, semesters, activeSemesterId, overrides };
+    });
+    setToast('学期已删除');
   };
 
   const wallpaperFit = state.settings.wallpaperFit || 'contain';
@@ -1038,7 +1129,7 @@ export default function App() {
         })}
       </div>
     </div>}
-    {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} reminderStatus={reminderStatus} />}
+    {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onDeleteSemester={deleteSemester} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} onOpenBattery={openBattery} onTestReminder={testReminder} reminderStatus={reminderStatus} />}
     <BottomNav view={view} setView={setView} />
     {slotGroup && <SlotSheet group={slotGroup} week={week} locationMode={state.settings.locationMode} periods={periods} onClose={() => setSlotGroup(null)} onChoose={(item) => { setSlotGroup(null); openOccurrence(item); }} />}
     {selected && <DetailSheet key={`${selected.meeting?.id}-${week}`} selected={selected} semester={semester} week={week} periods={periods} overrides={state.overrides} onClose={() => setSelected(null)} onSave={saveDetail} onDelete={deleteDetail} onAddMilestone={addMilestone} />}

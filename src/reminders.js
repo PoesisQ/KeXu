@@ -12,7 +12,9 @@ function occurrenceTime(semester, week, day, period, periods = DEFAULT_PERIODS) 
 export function buildReminderPayload(state, now = Date.now()) {
   const leadMinutes = Math.max(0, Number(state?.settings?.reminderMinutes || 10));
   const periods = normalizePeriodTimes(state?.settings?.periodTimes);
-  const latest = now + 1000 * 60 * 60 * 24 * 730;
+  // Avoid OEM per-app alarm quotas. The app resynchronizes on every launch,
+  // data change and package update, so one academic year is ample coverage.
+  const latest = now + 1000 * 60 * 60 * 24 * 370;
   const reminders = [];
   (state?.semesters || []).forEach((semester) => (semester.courses || []).forEach((course) => (course.meetings || []).forEach((baseMeeting) => {
     parseWeekSpec(baseMeeting.weeks, semester.weekCount).forEach((week) => {
@@ -33,7 +35,7 @@ export function buildReminderPayload(state, now = Date.now()) {
       });
     });
   })));
-  return reminders;
+  return reminders.sort((a, b) => a.notifyAt - b.notifyAt).slice(0, 400);
 }
 
 export function remindersAvailable() {
@@ -59,4 +61,14 @@ export async function getReminderStatus() {
 export async function openReminderSettings() {
   if (!remindersAvailable()) return { native: false };
   return ClassReminders.openAppSettings();
+}
+
+export async function openBatterySettings() {
+  if (!remindersAvailable()) return { native: false };
+  return ClassReminders.openBatterySettings();
+}
+
+export async function sendTestReminder() {
+  if (!remindersAvailable()) return { native: false, delivered: false };
+  return ClassReminders.sendTest();
 }

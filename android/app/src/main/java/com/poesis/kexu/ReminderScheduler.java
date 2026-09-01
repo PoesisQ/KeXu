@@ -15,6 +15,9 @@ public final class ReminderScheduler {
     public static final String CHANNEL_ID = "class_reminders";
     private static final String PREFS = "kexu_class_reminders";
     private static final String KEY_DATA = "scheduled";
+    private static final String KEY_COUNT = "scheduled_count";
+    private static final String KEY_NEXT = "next_notify_at";
+    private static final String KEY_LAST_TRIGGERED = "last_triggered_at";
 
     private ReminderScheduler() {}
 
@@ -38,13 +41,26 @@ public final class ReminderScheduler {
     public static int sync(Context context, String json) throws Exception {
         cancelStored(context);
         JSONArray reminders = new JSONArray(json == null ? "[]" : json);
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_DATA, reminders.toString()).apply();
         createChannel(context);
         int count = 0;
+        long nextNotifyAt = 0L;
         for (int index = 0; index < reminders.length(); index++) {
             JSONObject reminder = reminders.getJSONObject(index);
-            if (schedule(context, reminder)) count++;
+            try {
+                if (schedule(context, reminder)) {
+                    count++;
+                    long notifyAt = reminder.optLong("notifyAt", 0L);
+                    if (nextNotifyAt == 0L || (notifyAt > 0L && notifyAt < nextNotifyAt)) nextNotifyAt = notifyAt;
+                }
+            } catch (Exception ignored) {
+                // A malformed occurrence must not prevent all later reminders.
+            }
         }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_DATA, reminders.toString())
+            .putInt(KEY_COUNT, count)
+            .putLong(KEY_NEXT, nextNotifyAt)
+            .apply();
         return count;
     }
 
@@ -53,8 +69,53 @@ public final class ReminderScheduler {
             String json = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_DATA, "[]");
             JSONArray reminders = new JSONArray(json);
             createChannel(context);
-            for (int index = 0; index < reminders.length(); index++) schedule(context, reminders.getJSONObject(index));
+            int count = 0;
+            long nextNotifyAt = 0L;
+            for (int index = 0; index < reminders.length(); index++) {
+                JSONObject reminder = reminders.getJSONObject(index);
+                try {
+                    if (schedule(context, reminder)) {
+                        count++;
+                        long notifyAt = reminder.optLong("notifyAt", 0L);
+                        if (nextNotifyAt == 0L || (notifyAt > 0L && notifyAt < nextNotifyAt)) nextNotifyAt = notifyAt;
+                    }
+                } catch (Exception ignored) {}
+            }
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_COUNT, count).putLong(KEY_NEXT, nextNotifyAt).apply();
         } catch (Exception ignored) {}
+    }
+
+    public static int scheduledCount(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_COUNT, 0);
+    }
+
+    public static long nextNotifyAt(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_NEXT, 0L);
+    }
+
+    public static long lastTriggeredAt(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_LAST_TRIGGERED, 0L);
+    }
+
+    public static void recordTriggered(Context context, String triggeredId) {
+        long now = System.currentTimeMillis();
+        int count = 0;
+        long nextNotifyAt = 0L;
+        try {
+            JSONArray reminders = new JSONArray(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_DATA, "[]"));
+            for (int index = 0; index < reminders.length(); index++) {
+                JSONObject reminder = reminders.getJSONObject(index);
+                long notifyAt = reminder.optLong("notifyAt", 0L);
+                if (notifyAt <= now || reminder.optString("id").equals(triggeredId)) continue;
+                count++;
+                if (nextNotifyAt == 0L || notifyAt < nextNotifyAt) nextNotifyAt = notifyAt;
+            }
+        } catch (Exception ignored) {}
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_LAST_TRIGGERED, now)
+            .putInt(KEY_COUNT, count)
+            .putLong(KEY_NEXT, nextNotifyAt)
+            .apply();
     }
 
     private static boolean schedule(Context context, JSONObject reminder) throws Exception {

@@ -13,6 +13,7 @@ public class ClassReminderReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         ReminderScheduler.createChannel(context);
         String id = intent.getStringExtra("id");
+        ReminderScheduler.recordTriggered(context, id);
         String title = intent.getStringExtra("title");
         String teacher = intent.getStringExtra("teacher");
         String location = intent.getStringExtra("location");
@@ -32,12 +33,13 @@ public class ClassReminderReceiver extends BroadcastReceiver {
             .setStyle(new NotificationCompat.BigTextStyle().bigText("上课地点：" + safeLocation + "\n教师：" + safeTeacher))
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setWhen(startAt)
             .setUsesChronometer(true)
             .setChronometerCountDown(true)
-            .setOngoing(true)
-            .setAutoCancel(false)
+            .setOngoing(false)
+            .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setTimeoutAfter(Math.max(300_000, startAt - System.currentTimeMillis() + 300_000))
             .setContentIntent(openApp);

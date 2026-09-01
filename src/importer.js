@@ -341,24 +341,65 @@ function parseModelJson(content) {
   return JSON.parse(text || '{}');
 }
 
-async function imageDataUrl(file, signal) {
+function cropImageDataUrl(image, source, maxDimension, quality) {
+  const scale = Math.min(1, maxDimension / Math.max(source.width, source.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(source.width * scale));
+  canvas.height = Math.max(1, Math.round(source.height * scale));
+  canvas.getContext('2d', { alpha: false }).drawImage(image, source.x, source.y, source.width, source.height, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+async function imageVisionParts(file, signal) {
   ensureNotAborted(signal);
-  const canvas = await imageCanvas(file, 3200);
-  ensureNotAborted(signal);
-  return canvas.toDataURL('image/jpeg', 0.9);
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    ensureNotAborted(signal);
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    const full = { x: 0, y: 0, width, height };
+    const parts = [{ label: '全图概览', url: cropImageDataUrl(image, full, 1500, 0.8) }];
+    // Vision models resize each image before inference. Overlapping crops keep
+    // small timetable text legible without losing the whole-page context.
+    if (height / width > 1.35) {
+      const cropHeight = Math.ceil(height * 0.58);
+      parts.push({ label: '上半部分细节', url: cropImageDataUrl(image, { x: 0, y: 0, width, height: cropHeight }, 1900, 0.86) });
+      parts.push({ label: '下半部分细节', url: cropImageDataUrl(image, { x: 0, y: height - cropHeight, width, height: cropHeight }, 1900, 0.86) });
+    } else if (width / height > 1.65) {
+      const cropWidth = Math.ceil(width * 0.58);
+      parts.push({ label: '左半部分细节', url: cropImageDataUrl(image, { x: 0, y: 0, width: cropWidth, height }, 1900, 0.86) });
+      parts.push({ label: '右半部分细节', url: cropImageDataUrl(image, { x: width - cropWidth, y: 0, width: cropWidth, height }, 1900, 0.86) });
+    }
+    return parts;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = () => {}, signal) {
   if (!apiKey) throw new Error('未配置 DeepSeek API Key');
   const content = [{
     type: 'text',
-    text: `这些图片按上传顺序共同组成一张或多张大学课表，可能是同一张长课表的连续截图。请直接理解图片的空间排版、星期列、节次行、跨行色块与分页衔接，不要仅按 OCR 文本顺序猜测。\n
-只输出 JSON：{"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}]}。day 为周一 1 到周日 7，节次为 1 到 12。不要遗漏晚间 9-12 节。同一课程的理论和实验分别建 course，但 relatedId 相同；考核不是考试或地点为“未排地点”的安排优先判断为实验。英文课程名恢复单词空格。无法确定的字段留空，不要臆造。`
+    text: `这些图片按上传顺序共同组成一张或多张大学课表，可能是同一张长课表的连续截图。每张原图后可能附带有重叠的局部细节图；它们是同一张图的裁切，不能重复计课。
+
+先在内部完成以下检查再输出：1. 找到星期列标题与节次/时间行锚点；2. 按课程色块的空间边界确定 day、start、end，跨行色块不能只取文字所在一行；3. 区分字段语义：课程名称通常是色块主标题，教师应是人名或带“教师/老师”的字段，学分是小数，地点包含校区/楼栋/教室，培养方案或备注不能当课程名；4. 将同一课程同一属性的重复安排合并；5. 检查晚间 9-12 节和图片衔接处是否遗漏。
+
+只输出 JSON：{"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}],"issues":[]}。day 为周一 1 到周日 7，节次为 1 到 12。同一课程的理论、实验或实践分别建 course，但 relatedId 相同；考核不是考试或地点为“未排地点”的安排优先判断为实验。英文课程名恢复单词空格。任何字段无法确定就留空，并在 recognitionNote 或 issues 说明，不要用相邻文字猜测教师或课程名。`
   }];
+  let encodedSize = 0;
   for (let index = 0; index < files.length; index += 1) {
     onProgress({ stage: 'vision-prepare', page: index + 1, total: files.length, progress: (index + 0.2) / (files.length + 1), detail: '正在压缩图片，保留文字清晰度' });
-    content.push({ type: 'text', text: `第 ${index + 1} 张（共 ${files.length} 张）` });
-    content.push({ type: 'image_url', image_url: { url: await imageDataUrl(files[index], signal), detail: 'original' } });
+    const parts = await imageVisionParts(files[index], signal);
+    content.push({ type: 'text', text: `第 ${index + 1} 张原始截图（共 ${files.length} 张），下面 ${parts.length} 幅为同一截图的概览与细节：` });
+    parts.forEach((part) => {
+      encodedSize += part.url.length;
+      content.push({ type: 'text', text: `第 ${index + 1} 张 · ${part.label}` });
+      content.push({ type: 'image_url', image_url: { url: part.url, detail: 'original' } });
+    });
+    if (encodedSize > 45 * 1024 * 1024) throw new Error('所选图片压缩后仍超过视觉接口限制，请减少张数或先裁掉无关区域。');
   }
   onProgress({ stage: 'vision', page: files.length, total: files.length, progress: 0.7, detail: '正在理解星期列、节次行与跨图衔接' });
   const data = await fetchDeepSeek({
@@ -370,7 +411,10 @@ export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = ()
     messages: [{ role: 'user', content }]
   }, apiKey, signal);
   const raw = data.choices?.[0]?.message?.content || '{}';
-  return { rawText: raw, courses: normalizeAIResult(parseModelJson(raw)), method: `DeepSeek 视觉版面识别 · ${files.length} 张`, pageCount: files.length };
+  const parsed = parseModelJson(raw);
+  const courses = normalizeAIResult(parsed);
+  const qualityWarnings = modelQualityWarnings(parsed, courses);
+  return { rawText: raw, courses, warning: qualityWarnings, method: `DeepSeek 视觉版面识别 · ${files.length} 张`, pageCount: files.length };
 }
 
 async function recognizeSingleFile(file, onProgress = () => {}, signal) {
@@ -443,7 +487,18 @@ export async function recognizeScheduleFiles(inputFiles, options = {}, onProgres
     const local = await recognizeLocalImageFiles(files, onProgress, signal);
     return { ...local, courses: parseRecognizedText(local.rawText), warning: '当前使用免费本地 OCR；复杂课表只能按文字线索整理，版面还原能力有限。' };
   }
-  return recognizeSingleFile(files[0], onProgress, signal);
+  const local = await recognizeSingleFile(files[0], onProgress, signal);
+  if (options.apiKey && options.preferVision !== false) {
+    try {
+      onProgress({ stage: 'ai', page: 1, total: 1, progress: 0.62, detail: '正在区分课程、教师、地点与描述字段' });
+      const structured = await structureTextWithDeepSeek(local.rawText, options.apiKey, signal);
+      return { ...local, courses: structured.courses, method: `${local.method} + DeepSeek 结构化`, warning: structured.warning };
+    } catch (modelError) {
+      if (modelError.name === 'AbortError') throw modelError;
+      return { ...local, warning: `${modelError.message} 已保留本地文档解析结果。` };
+    }
+  }
+  return local;
 }
 
 export async function recognizeScheduleFile(file, onProgress = () => {}) {
@@ -452,15 +507,25 @@ export async function recognizeScheduleFile(file, onProgress = () => {}) {
 
 function normalizeAIResult(result) {
   const courses = Array.isArray(result?.courses) ? result.courses : [];
-  const normalized = courses.map((course, courseIndex) => ({
+  const normalized = courses.map((course, courseIndex) => {
+    const notes = [];
+    let teacher = String(course.teacher || '').trim();
+    if (teacher.length > 24 || /课程|学分|周次|星期|考核方式|上课地点|教学班/.test(teacher)) {
+      notes.push('教师字段疑似混入其他描述，已留空');
+      teacher = '';
+    }
+    const category = course.category === '实践' ? '实践' : /实验|实训|设计/.test(course.category || course.title) ? '实验' : '理论';
+    return ({
     id: id('course'),
     title: normalizeCourseTitle(course.title || '未命名课程'),
-    teacher: String(course.teacher || ''),
+    teacher,
     credits: String(course.credits || ''),
     color: COLORS[courseIndex % COLORS.length],
     source: 'import',
-    category: /实验|实践|设计/.test(course.category || course.title) ? '实验' : '理论',
+    category,
     relatedId: String(course.relatedId || course.title || courseIndex).replace(/实验|实践|课程设计/g, ''),
+    recognitionConfidence: Math.min(1, Math.max(0, Number(course.confidence) || 0.65)),
+    recognitionNote: [course.recognitionNote, ...notes].filter(Boolean).join('；'),
     gradeComposition: '', rollCall: '未知', notes: '', milestones: [],
     meetings: (course.meetings || []).map((meeting) => ({
       id: id('meeting'), day: Math.min(7, Math.max(1, Number(meeting.day) || 1)),
@@ -468,7 +533,7 @@ function normalizeAIResult(result) {
       end: Math.min(12, Math.max(1, Number(meeting.end) || Number(meeting.start) || 1)),
       weeks: parseWeekSpec(meeting.weeks), location: String(meeting.location || '')
     }))
-  })).filter((course) => course.meetings.length);
+  }); }).filter((course) => course.meetings.length);
   const relationColors = new Map();
   normalized.forEach((course) => {
     if (!relationColors.has(course.relatedId)) relationColors.set(course.relatedId, course.color);
@@ -477,14 +542,27 @@ function normalizeAIResult(result) {
   return normalized;
 }
 
-export async function refineWithDeepSeek(rawText, apiKey) {
+function modelQualityWarnings(result, courses) {
+  const issues = Array.isArray(result?.issues) ? result.issues.map(String).filter(Boolean) : [];
+  const lowConfidence = courses.filter((course) => course.recognitionConfidence < 0.72 || course.recognitionNote).length;
+  if (lowConfidence) issues.unshift(`${lowConfidence} 门课程存在低置信度或字段疑点，已在预览中标记，请重点核对。`);
+  return issues.slice(0, 6).join(' ');
+}
+
+async function structureTextWithDeepSeek(rawText, apiKey, signal) {
   const data = await fetchDeepSeek({
-      model: 'deepseek-v4-flash', temperature: 0, thinking: { type: 'disabled' }, max_tokens: 12000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: '你是大学课表结构化助手。只输出 JSON。不要臆造识别文本中没有的信息。英文课程名必须恢复正确的单词空格，例如 ComputerNetwork 写为 Computer Network、DigitalLogicCircuits 写为 Digital Logic Circuits。必须逐条排课判断：考核方式不是“考试”，或者场地为“未排地点”的排课写为实验；其余写为理论。同名课程同时含理论和实验排课时拆成两个 course，但 title 可以相同，relatedId 必须相同。不能遗漏第9-12节或跨页续写的排课。' },
-        { role: 'user', content: `把下面 OCR 文本整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}]}。day 为周一1到周日7，节次1到12，完整保留校区和场地。\n\n${rawText.slice(0, 60000)}` }
-      ]
-  }, apiKey);
-  return normalizeAIResult(parseModelJson(data.choices?.[0]?.message?.content));
+    model: 'deepseek-v4-flash', temperature: 0, thinking: { type: 'disabled' }, max_tokens: 12000,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: '你是大学课表结构化与数据质检助手。输入是从 Word、Excel、PDF 文本层或纯文本直接提取的内容，不是 OCR 图片。利用字段标签、表头、行列标记和语义同时判断，绝不能把教师、专业描述、培养方案、考核说明或地点当作课程名。任何不确定字段留空并降低 confidence，不要猜测。只输出 JSON。' },
+      { role: 'user', content: `整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}],"issues":[]}。day 为周一1到周日7，节次1到12。必须检查第9-12节、跨页续写、同名理论与实验；英文课程名恢复单词空格。考核不是考试或地点是未排地点的安排优先作为实验。\n\n原始文档结构：\n${String(rawText || '').slice(0, 90000)}` }
+    ]
+  }, apiKey, signal);
+  const parsed = parseModelJson(data.choices?.[0]?.message?.content);
+  const courses = normalizeAIResult(parsed);
+  return { courses, warning: modelQualityWarnings(parsed, courses) };
+}
+
+export async function refineWithDeepSeek(rawText, apiKey, signal) {
+  return (await structureTextWithDeepSeek(rawText, apiKey, signal)).courses;
 }

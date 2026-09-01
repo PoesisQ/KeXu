@@ -61,9 +61,6 @@ export function loadState() {
         }
         return { ...bundled, ...semester, weekCount: Math.max(semester.weekCount || 0, bundled?.weekCount || 0), courses };
       });
-      BUNDLED_SEMESTERS.forEach((bundled) => {
-        if (!semesters.some((semester) => semester.id === bundled.id)) semesters.push(bundled);
-      });
       if (!semesters.length) return initial;
       const activeSemesterId = semesters.some((semester) => semester.id === saved.activeSemesterId)
         ? saved.activeSemesterId
