@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { pointerVelocity, resolveWeekSwipe } from '../gesture';
 
 const SETTLE_MS = 340;
@@ -9,17 +10,38 @@ export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart,
   const settlingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const timerRef = useRef(null);
+  const frameRef = useRef(null);
+  const pendingOffsetRef = useRef(0);
+
+  const applyPagerOffset = useCallback((pixels) => {
+    const pager = pagerRef.current;
+    if (!pager) return;
+    pager.style.setProperty('--drag-x', `${pixels}px`);
+  }, []);
 
   const setPagerOffset = useCallback((pixels, animate = false) => {
     const pager = pagerRef.current;
     if (!pager) return;
     pager.classList.toggle('settling', animate);
-    pager.style.setProperty('--drag-x', `${pixels}px`);
     pager.style.setProperty('--settle-duration', `${SETTLE_MS}ms`);
-  }, []);
+    pendingOffsetRef.current = pixels;
+    if (animate) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      applyPagerOffset(pixels);
+      return;
+    }
+    if (frameRef.current !== null) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      applyPagerOffset(pendingOffsetRef.current);
+    });
+  }, [applyPagerOffset]);
 
   const resetPager = useCallback(() => {
     clearTimeout(timerRef.current);
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
     settlingRef.current = false;
     dragRef.current = null;
     suppressClickRef.current = false;
@@ -43,9 +65,17 @@ export function useWeekPager({ week, weekCount, onWeekChange, onTransitionStart,
       const pager = pagerRef.current;
       if (pager) {
         pager.classList.remove('settling');
-        pager.style.setProperty('--drag-x', '0px');
+        pager.classList.add('committing');
       }
-      onWeekChange(next);
+      // Keep the outgoing target page in place until React has synchronously
+      // committed the new three-page window, then reset the offset before the
+      // browser can paint. This avoids the one-frame old-page flash seen in
+      // Android WebView at the end of a swipe.
+      flushSync(() => onWeekChange(next));
+      if (pager) {
+        pager.style.setProperty('--drag-x', '0px');
+        requestAnimationFrame(() => pager.classList.remove('committing'));
+      }
       onTransitionEnd?.(next);
       settlingRef.current = false;
     }, SETTLE_MS + 20);

@@ -34,13 +34,13 @@ function IconButton({ label, children, className = '', ...props }) {
   return <button type="button" aria-label={label} className={`icon-button ${className}`} {...props}>{children}</button>;
 }
 
-function TopBar({ semester, week, currentWeek, onNavigate, onPickWeek, openImport }) {
+function TopBar({ semester, week, weekLabelRef, currentWeek, onNavigate, onPickWeek, openImport }) {
   const canReturn = currentWeek >= 1 && currentWeek <= semester.weekCount && week !== currentWeek;
   return (
     <header className="topbar">
       <div className="brand-block">
         <div>
-          <div className="week-heading"><button className="week-title" aria-haspopup="dialog" onClick={onPickWeek}>第{week}周<ChevronDown /></button>{canReturn && <button className="return-week" onClick={() => onNavigate(currentWeek, true)}>回本周</button>}</div>
+          <div className="week-heading"><button className="week-title" aria-haspopup="dialog" onClick={onPickWeek}><span ref={weekLabelRef}>第{week}周</span><ChevronDown /></button>{canReturn && <button className="return-week" onClick={() => onNavigate(currentWeek, true)}>回本周</button>}</div>
           <div className="semester-caption">{semester.name}</div>
         </div>
       </div>
@@ -549,9 +549,6 @@ export default function App() {
   const [state, setState] = useState(loadState);
   const semester = state.semesters.find((item) => item.id === state.activeSemesterId) || state.semesters[0];
   const [week, setWeek] = useState(() => clamp(currentAcademicWeek(semester.firstMonday), 1, semester.weekCount));
-  const [headerWeek, setHeaderWeek] = useState(week);
-  const [weekSettling, setWeekSettling] = useState(false);
-  const [daySettling, setDaySettling] = useState(false);
   const [day, setDay] = useState(() => clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7));
   const [view, setView] = useState('week');
   const [selected, setSelected] = useState(null);
@@ -561,16 +558,19 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [reminderStatus, setReminderStatus] = useState(null);
   const viewRef = useRef(view);
+  const weekLabelRef = useRef(null);
   viewRef.current = view;
   const todayWeek = currentAcademicWeek(semester.firstMonday);
   const todayDay = clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7);
   const semesterContainsToday = todayWeek >= 1 && todayWeek <= semester.weekCount;
+  const previewWeekTitle = useCallback((nextWeek) => {
+    if (weekLabelRef.current) weekLabelRef.current.textContent = `第${nextWeek}周`;
+  }, []);
   const { pagerRef, suppressClickRef, navigateWeek, resetPager, pointerHandlers } = useWeekPager({
     week,
     weekCount: semester.weekCount,
     onWeekChange: setWeek,
-    onTransitionStart: (nextWeek) => { setHeaderWeek(nextWeek); setWeekSettling(true); },
-    onTransitionEnd: () => setWeekSettling(false)
+    onTransitionStart: previewWeekTitle
   });
   const dayIndex = (week - 1) * 7 + day;
   const setDateIndex = useCallback((nextIndex) => {
@@ -587,11 +587,10 @@ export default function App() {
     week: dayIndex,
     weekCount: semester.weekCount * 7,
     onWeekChange: setDateIndex,
-    onTransitionStart: (nextIndex) => { setHeaderWeek(Math.floor((nextIndex - 1) / 7) + 1); setDaySettling(true); },
-    onTransitionEnd: () => setDaySettling(false)
+    onTransitionStart: (nextIndex) => previewWeekTitle(Math.floor((nextIndex - 1) / 7) + 1)
   });
   useEffect(() => { saveState(state); }, [state]);
-  useEffect(() => { setHeaderWeek(week); }, [week]);
+  useEffect(() => { previewWeekTitle(week); }, [previewWeekTitle, week]);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return undefined;
     let disposed = false;
@@ -612,8 +611,6 @@ export default function App() {
   useEffect(() => {
     resetPager();
     resetDayPager();
-    setWeekSettling(false);
-    setDaySettling(false);
     setWeek(clamp(currentAcademicWeek(semester.firstMonday), 1, semester.weekCount));
   }, [resetDayPager, resetPager, semester.firstMonday, semester.id, semester.weekCount]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 2200); return () => clearTimeout(timer); }, [toast]);
@@ -757,9 +754,9 @@ export default function App() {
   return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'}`}>
     <div className="wallpaper" style={wallpaperStyle} />
     <div className="wallpaper-wash" style={{ opacity: state.settings.wallpaper ? Math.max(0, 1 - state.settings.wallpaperOpacity) : 1 }} />
-    {view !== 'settings' && <TopBar semester={semester} week={headerWeek} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}
+    {view !== 'settings' && <TopBar semester={semester} week={week} weekLabelRef={weekLabelRef} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}
     {view === 'week' && <div
-      className={`week-pager ${weekSettling ? 'settling' : ''}`}
+      className="week-pager"
       ref={pagerRef}
       {...pointerHandlers}
       onClickCapture={(event) => { if (suppressClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
@@ -771,7 +768,7 @@ export default function App() {
       })}
     </div>}
     {view === 'day' && <div
-      className={`day-pager ${daySettling ? 'settling' : ''}`}
+      className="day-pager"
       ref={dayPagerRef}
       {...dayPointerHandlers}
       onClickCapture={(event) => { if (suppressDayClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}

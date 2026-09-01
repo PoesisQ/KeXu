@@ -43,10 +43,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .week-pager { --drag-x: 0px; position: relative; z-index: 3; height: calc(100dvh - var(--topbar-height)); overflow: hidden; touch-action: pan-y; user-select: none; contain: layout paint; }
 .week-page { position: absolute; inset: 0; background: transparent; will-change: transform; contain: layout paint style; backface-visibility: hidden; }
-.carousel-page { transform: translate3d(calc(var(--page-base) + var(--drag-x)),0,0); backface-visibility: hidden; }
+.carousel-page { transform: translate3d(calc(var(--page-base) + var(--drag-x)),0,0); backface-visibility: hidden; will-change: transform; }
+.week-pager.committing .carousel-page, .day-pager.committing .carousel-page { transition: none !important; }
 .week-pager.settling .carousel-page { transition: transform var(--settle-duration, 340ms) cubic-bezier(.16,.82,.18,1); }
 .side-page { pointer-events: none; }
-.week-dates { height: 63px; display: grid; grid-template-columns: 40px repeat(7, minmax(0,1fr)); position: relative; z-index: 4; background: rgba(252,249,247,.78); backdrop-filter: blur(20px) saturate(115%); border-bottom: 1px solid var(--line); }
+.week-dates { height: 63px; display: grid; grid-template-columns: 40px repeat(7, minmax(0,1fr)); position: relative; z-index: 4; background: rgba(252,249,247,.9); border-bottom: 1px solid var(--line); }
 .month-corner { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #737a75; border-right: 1px solid var(--line); line-height: 1.05; }
 .month-corner strong { font-size: 12px; font-weight: 720; }
 .month-corner span { margin-top: 3px; font-size: 10px; writing-mode: vertical-rl; }
@@ -108,7 +109,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .page-enter { animation: pageIn .3s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes pageIn { from { opacity: 0; transform: translateY(7px); } }
 .day-pager { --drag-x: 0px; position: relative; z-index: 3; height: calc(100dvh - var(--topbar-height)); overflow: hidden; touch-action: pan-y; user-select: none; contain: layout paint; }
-.day-page { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 118px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; contain: layout paint style; backface-visibility: hidden; }
+.day-page { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 118px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; contain: layout paint style; backface-visibility: hidden; will-change: transform; }
 .day-page::-webkit-scrollbar { display: none; }
 .day-pager.settling .carousel-page { transition: transform var(--settle-duration, 340ms) cubic-bezier(.16,.82,.18,1); }
 .day-view { position: relative; z-index: 3; min-height: 100%; padding: 20px 18px 104px; }
@@ -118,12 +119,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .day-hero span { color: var(--muted); font-size: 12px; }
 .day-hero h1 { font-size: 28px; margin: 3px 0 0; letter-spacing: -.5px; }
 .soft-button { border: 0; border-radius: 12px; background: rgba(255,255,255,.7); min-height: 38px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 650; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.05); }
-.day-strip { width: 100%; min-width: 0; display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); padding: 6px; border-radius: 18px; background: rgba(255,255,255,.62); backdrop-filter: blur(16px) saturate(120%); margin-bottom: 16px; box-shadow: 0 8px 24px rgba(37,42,38,.045), inset 0 0 0 1px rgba(255,255,255,.34); overflow: hidden; }
+.day-strip { width: 100%; min-width: 0; display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); padding: 6px; border-radius: 18px; background: rgba(255,255,255,.84); margin-bottom: 16px; box-shadow: 0 8px 24px rgba(37,42,38,.045), inset 0 0 0 1px rgba(255,255,255,.34); overflow: hidden; }
 .day-strip button { width: 100%; min-width: 0; margin: 0; border: 0; border-radius: 13px; background: none; padding: 7px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--muted); text-align: center; }
 .day-strip span { width: 100%; font-size: 10px; line-height: 1.2; text-align: center; }.day-strip b { display: block; width: 100%; font-size: 15px; line-height: 1.25; font-variant-numeric: tabular-nums; text-align: center; }
 .day-strip button.active { background: var(--ink); color: white; box-shadow: 0 6px 14px rgba(0,0,0,.13); }
 .agenda { display: flex; flex-direction: column; gap: 9px; }
-.agenda-item { width: 100%; border: 0; border-radius: 18px; padding: 15px 14px; background: rgba(255,255,255,.74); backdrop-filter: blur(15px); display: grid; grid-template-columns: 47px 3px 1fr 18px; align-items: center; gap: 12px; text-align: left; box-shadow: 0 8px 22px rgba(28,29,26,.05); cursor: pointer; transition: transform .17s; }
+.agenda-item { width: 100%; border: 0; border-radius: 18px; padding: 15px 14px; background: rgba(255,255,255,.86); display: grid; grid-template-columns: 47px 3px 1fr 18px; align-items: center; gap: 12px; text-align: left; box-shadow: 0 8px 22px rgba(28,29,26,.05); cursor: pointer; transition: transform .17s; }
 .agenda-item:active { transform: scale(.98); }
 .agenda-time { align-self: start; display: flex; flex-direction: column; gap: 4px; }
 .agenda-time strong { font-size: 13px; }.agenda-time span { color: var(--muted); font-size: 11px; }
