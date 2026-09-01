@@ -191,16 +191,78 @@ export function mergePageTextPages(pages) {
   return dayParts.map((parts, dayIndex) => `星期${WEEKDAYS[dayIndex]}\n${parts.join('\n')}`).join('\n\n');
 }
 
-async function ocrCanvas(canvas, onProgress) {
+const IMAGE_PATTERN = /\.(png|jpe?g|webp|bmp|gif)$/i;
+
+function isImageFile(file) {
+  return Boolean(file?.type?.startsWith('image/') || IMAGE_PATTERN.test(file?.name || ''));
+}
+
+function abortError() {
+  return new DOMException('识别已取消', 'AbortError');
+}
+
+function ensureNotAborted(signal) {
+  if (signal?.aborted) throw abortError();
+}
+
+async function imageCanvas(file, maxDimension = 0) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const scale = maxDimension > 0 ? Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight)) : 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext('2d', { alpha: false }).drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function createOcrSession(signal, onInitialize = () => {}) {
+  ensureNotAborted(signal);
   const { createWorker } = await import('tesseract.js');
+  let progressListener = onInitialize;
   const worker = await createWorker('chi_sim+eng', 1, {
     logger: (message) => {
-      if (message.status === 'recognizing text') onProgress?.(message.progress);
+      const initialization = {
+        'loading tesseract core': 0.04,
+        'initializing tesseract': 0.08,
+        'loading language traineddata': 0.14,
+        'initializing api': 0.22
+      }[message.status];
+      if (initialization) progressListener(initialization, message.status);
+      if (message.status === 'recognizing text') progressListener(0.25 + message.progress * 0.75, message.status);
     }
   });
-  const result = await worker.recognize(canvas);
-  await worker.terminate();
-  return result.data.text;
+  const abort = () => worker.terminate().catch(() => {});
+  signal?.addEventListener('abort', abort, { once: true });
+  return {
+    async recognize(canvas, onProgress) {
+      progressListener = onProgress || (() => {});
+      ensureNotAborted(signal);
+      const result = await worker.recognize(canvas);
+      ensureNotAborted(signal);
+      return result.data.text;
+    },
+    async close() {
+      progressListener = () => {};
+      signal?.removeEventListener('abort', abort);
+      await worker.terminate().catch(() => {});
+    }
+  };
+}
+
+async function ocrCanvas(canvas, onProgress, signal) {
+  const session = await createOcrSession(signal, onProgress);
+  try {
+    return await session.recognize(canvas, onProgress);
+  } finally {
+    await session.close();
+  }
 }
 
 async function renderPage(page, scale = 2.25) {
@@ -213,7 +275,105 @@ async function renderPage(page, scale = 2.25) {
   return canvas;
 }
 
-export async function recognizeScheduleFile(file, onProgress = () => {}) {
+async function recognizeLocalImageFiles(files, onProgress, signal) {
+  const textParts = [];
+  const session = await createOcrSession(signal, (progress, status) => onProgress({
+    stage: 'ocr', page: 1, total: files.length,
+    progress: progress / files.length,
+    detail: status === 'loading language traineddata' ? '首次使用正在准备中文识别模型' : '正在初始化本地 OCR'
+  }));
+  try {
+    for (let index = 0; index < files.length; index += 1) {
+      ensureNotAborted(signal);
+      const canvas = await imageCanvas(files[index]);
+      const text = await session.recognize(canvas, (progress, status) => onProgress({
+        stage: 'ocr', page: index + 1, total: files.length,
+        progress: (index + progress) / files.length,
+        detail: status === 'loading language traineddata' ? '首次使用正在准备中文识别模型' : '正在识别文字'
+      }));
+      textParts.push(`图片 ${index + 1}\n${text}`);
+    }
+  } finally {
+    await session.close();
+  }
+  return { rawText: textParts.join('\n\n'), method: files.length > 1 ? `本地 OCR · ${files.length} 张拼图` : '本地 OCR', pageCount: files.length };
+}
+
+export function deepSeekErrorMessage(status, body = '') {
+  if (status === 402) return 'DeepSeek 账户余额不足（402）。已保留本地识别结果；充值后可使用视觉版面识别。';
+  if (status === 401) return 'DeepSeek API Key 无效或已失效（401），请在设置中重新填写。';
+  if (status === 429) return 'DeepSeek 请求过于频繁（429），请稍后重试。';
+  if (status === 503) return 'DeepSeek 当前繁忙（503），请稍后重试。';
+  const detail = String(body || '').slice(0, 180).replace(/\s+/g, ' ');
+  return `DeepSeek 请求失败（${status}）${detail ? `：${detail}` : ''}`;
+}
+
+async function fetchDeepSeek(payload, apiKey, signal, timeoutMs = 120000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  const abort = () => controller.abort('cancelled');
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      const error = new Error(deepSeekErrorMessage(response.status, body));
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  } catch (error) {
+    if (signal?.aborted) throw abortError();
+    if (controller.signal.aborted) throw new Error('DeepSeek 连接超过 120 秒，已停止等待。');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+function parseModelJson(content) {
+  const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  return JSON.parse(text || '{}');
+}
+
+async function imageDataUrl(file, signal) {
+  ensureNotAborted(signal);
+  const canvas = await imageCanvas(file, 3200);
+  ensureNotAborted(signal);
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
+export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = () => {}, signal) {
+  if (!apiKey) throw new Error('未配置 DeepSeek API Key');
+  const content = [{
+    type: 'text',
+    text: `这些图片按上传顺序共同组成一张或多张大学课表，可能是同一张长课表的连续截图。请直接理解图片的空间排版、星期列、节次行、跨行色块与分页衔接，不要仅按 OCR 文本顺序猜测。\n
+只输出 JSON：{"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}]}。day 为周一 1 到周日 7，节次为 1 到 12。不要遗漏晚间 9-12 节。同一课程的理论和实验分别建 course，但 relatedId 相同；考核不是考试或地点为“未排地点”的安排优先判断为实验。英文课程名恢复单词空格。无法确定的字段留空，不要臆造。`
+  }];
+  for (let index = 0; index < files.length; index += 1) {
+    onProgress({ stage: 'vision-prepare', page: index + 1, total: files.length, progress: (index + 0.2) / (files.length + 1), detail: '正在压缩图片，保留文字清晰度' });
+    content.push({ type: 'text', text: `第 ${index + 1} 张（共 ${files.length} 张）` });
+    content.push({ type: 'image_url', image_url: { url: await imageDataUrl(files[index], signal), detail: 'original' } });
+  }
+  onProgress({ stage: 'vision', page: files.length, total: files.length, progress: 0.7, detail: '正在理解星期列、节次行与跨图衔接' });
+  const data = await fetchDeepSeek({
+    model: 'deepseek-v4-flash-vision-exp',
+    temperature: 0,
+    thinking: { type: 'disabled' },
+    max_tokens: 12000,
+    response_format: { type: 'json_object' },
+    messages: [{ role: 'user', content }]
+  }, apiKey, signal);
+  const raw = data.choices?.[0]?.message?.content || '{}';
+  return { rawText: raw, courses: normalizeAIResult(parseModelJson(raw)), method: `DeepSeek 视觉版面识别 · ${files.length} 张`, pageCount: files.length };
+}
+
+async function recognizeSingleFile(file, onProgress = () => {}, signal) {
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   let rawText = '';
   let method = '本地 OCR';
@@ -252,22 +412,42 @@ export async function recognizeScheduleFile(file, onProgress = () => {}) {
       for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
         const page = await document.getPage(pageNumber);
         const canvas = await renderPage(page);
-        ocrParts.push(await ocrCanvas(canvas, (progress) => onProgress({ stage: 'ocr', page: pageNumber, total: pageCount, progress })));
+      ocrParts.push(await ocrCanvas(canvas, (progress, status) => onProgress({ stage: 'ocr', page: pageNumber, total: pageCount, progress, detail: status === 'loading language traineddata' ? '首次使用正在准备中文识别模型' : '正在识别文字' }), signal));
       }
       rawText = ocrParts.join('\n\n');
     }
-  } else if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(file.name)) {
-    const image = new Image();
-    image.src = URL.createObjectURL(file);
-    await image.decode();
-    const canvas = document.createElement('canvas');
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    canvas.getContext('2d').drawImage(image, 0, 0);
-    rawText = await ocrCanvas(canvas, (progress) => onProgress({ stage: 'ocr', page: 1, total: 1, progress }));
-    URL.revokeObjectURL(image.src);
+  } else if (isImageFile(file)) {
+    const result = await recognizeLocalImageFiles([file], onProgress, signal);
+    ({ rawText, method, pageCount } = result);
   } else throw new Error('暂不支持这种文件格式');
   return { rawText, courses: parseRecognizedText(rawText), method, pageCount };
+}
+
+export async function recognizeScheduleFiles(inputFiles, options = {}, onProgress = () => {}, signal) {
+  const files = Array.from(inputFiles || []).filter(Boolean);
+  if (!files.length) throw new Error('请选择至少一个课表文件');
+  if (files.length > 8) throw new Error('一次最多选择 8 张课表图片');
+  const allImages = files.every(isImageFile);
+  if (files.length > 1 && !allImages) throw new Error('多文件导入仅支持图片；PDF、Excel 或 Word 请单独选择');
+  if (allImages && options.apiKey && options.preferVision !== false) {
+    try {
+      return await recognizeImagesWithDeepSeek(files, options.apiKey, onProgress, signal);
+    } catch (visionError) {
+      if (visionError.name === 'AbortError') throw visionError;
+      onProgress({ stage: 'fallback', page: 0, total: files.length, progress: 0, detail: `${visionError.message} 正在改用本地 OCR。` });
+      const local = await recognizeLocalImageFiles(files, onProgress, signal);
+      return { ...local, courses: parseRecognizedText(local.rawText), warning: visionError.message };
+    }
+  }
+  if (allImages) {
+    const local = await recognizeLocalImageFiles(files, onProgress, signal);
+    return { ...local, courses: parseRecognizedText(local.rawText), warning: '当前使用免费本地 OCR；复杂课表只能按文字线索整理，版面还原能力有限。' };
+  }
+  return recognizeSingleFile(files[0], onProgress, signal);
+}
+
+export async function recognizeScheduleFile(file, onProgress = () => {}) {
+  return recognizeScheduleFiles([file], {}, onProgress);
 }
 
 function normalizeAIResult(result) {
@@ -298,19 +478,13 @@ function normalizeAIResult(result) {
 }
 
 export async function refineWithDeepSeek(rawText, apiKey) {
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: 'deepseek-chat', temperature: 0,
+  const data = await fetchDeepSeek({
+      model: 'deepseek-v4-flash', temperature: 0, thinking: { type: 'disabled' }, max_tokens: 12000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: '你是大学课表结构化助手。只输出 JSON。不要臆造识别文本中没有的信息。英文课程名必须恢复正确的单词空格，例如 ComputerNetwork 写为 Computer Network、DigitalLogicCircuits 写为 Digital Logic Circuits。必须逐条排课判断：考核方式不是“考试”，或者场地为“未排地点”的排课写为实验；其余写为理论。同名课程同时含理论和实验排课时拆成两个 course，但 title 可以相同，relatedId 必须相同。不能遗漏第9-12节或跨页续写的排课。' },
         { role: 'user', content: `把下面 OCR 文本整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":""}]}]}。day 为周一1到周日7，节次1到12，完整保留校区和场地。\n\n${rawText.slice(0, 60000)}` }
       ]
-    })
-  });
-  if (!response.ok) throw new Error(`DeepSeek 返回 ${response.status}`);
-  const data = await response.json();
-  return normalizeAIResult(JSON.parse(data.choices?.[0]?.message?.content || '{}'));
+  }, apiKey);
+  return normalizeAIResult(parseModelJson(data.choices?.[0]?.message?.content));
 }

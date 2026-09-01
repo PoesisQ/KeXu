@@ -10,9 +10,9 @@ import { COLORS, normalizeWeekFontSize } from './data';
 import { IMPORT_ACCEPT } from './importFormats';
 import { APP_NAME, APP_VERSION, backupFileName } from './config';
 import {
-  PERIODS, WEEKDAYS, addDays, cardLocationLayout, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
+  DEFAULT_PERIODS, WEEKDAYS, addDays, cardLocationLayout, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
   formatWeekSpec, groupOverlappingOccurrences, isMeetingActive, locationWrapParts, meetingKey, mergeImportedSemester, occurrencesForWeek, parseWeekSpec,
-  resolveMeeting, shouldForceRoomWrap, splitMeetingFromWeek, toISODate
+  normalizePeriodTimes, resolveMeeting, shouldForceRoomWrap, splitMeetingFromWeek, toISODate
 } from './schedule';
 import { exportState, loadState, saveState } from './storage';
 import { getReminderStatus, openReminderSettings, remindersAvailable, requestReminderAccess, syncNativeReminders } from './reminders';
@@ -193,12 +193,13 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
 }
 
 function WeekGrid({ semester, week, settings, overrides, onOpen, onAdd }) {
+  const periods = normalizePeriodTimes(settings.periodTimes);
   const items = useMemo(() => occurrencesForWeek(semester, week, overrides)
     .filter((item) => !item.meeting.hidden && (settings.showInactive || item.active)), [semester, week, overrides, settings.showInactive]);
   const groups = useMemo(() => groupOverlappingOccurrences(items), [items]);
   return <>
         <div className="grid-surface">
-          {PERIODS.map((_, row) => Array.from({ length: 7 }, (_, day) => (
+          {periods.map((_, row) => Array.from({ length: 7 }, (_, day) => (
             <button aria-label={`周${WEEKDAYS[day]}第${row + 1}节添加`} className="empty-cell" key={`${row}-${day}`} onClick={() => onAdd(day + 1, row + 1)} />
           )))}
         </div>
@@ -216,13 +217,13 @@ function WeekGrid({ semester, week, settings, overrides, onOpen, onAdd }) {
   </>;
 }
 
-function PeriodRail() {
+function PeriodRail({ periods }) {
   return <div className="period-rail" aria-label="上课时间">
-    {PERIODS.map(([start, end], index) => <div className="period-label" key={start}><strong>{index + 1}</strong><span>{start}<br />{end}</span></div>)}
+    {periods.map(([start, end], index) => <div className="period-label" key={`${index}-${start}`}><strong>{index + 1}</strong><span>{start}<br />{end}</span></div>)}
   </div>;
 }
 
-function SlotSheet({ group, week, locationMode, onClose, onChoose }) {
+function SlotSheet({ group, week, locationMode, periods, onClose, onChoose }) {
   useBackHandler(true, onClose);
   const ordered = [...group.items].sort((a, b) => Number(b.active) - Number(a.active) || a.meeting.start - b.meeting.start);
   return <div className="modal-root" role="dialog" aria-modal="true" aria-label="该时段全部课程">
@@ -238,7 +239,7 @@ function SlotSheet({ group, week, locationMode, onClose, onChoose }) {
           <i style={{ background: item.course.color }} />
           <span className="slot-course-main">
             <span className="slot-course-title">{item.course.category === '实验' && <em>实验</em>}{item.kind === 'milestone' && <em>{item.milestone.type}</em>}{item.course.title}</span>
-            <small>{formatWeekSpec(parseWeekSpec(item.meeting.weeks))} · 第{item.meeting.start}-{item.meeting.end}节 · {formatPeriodRange(item.meeting.start, item.meeting.end)}</small>
+            <small>{formatWeekSpec(parseWeekSpec(item.meeting.weeks))} · 第{item.meeting.start}-{item.meeting.end}节 · {formatPeriodRange(item.meeting.start, item.meeting.end, periods)}</small>
             <small><MapPin size={12} />{displayLocation(item.meeting.location, locationMode)}</small>
           </span>
           <span className={`slot-status ${item.active ? 'active' : ''}`}>{item.active ? '本周' : '非本周'}</span>
@@ -329,6 +330,7 @@ function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday }) {
 }
 
 function DayAgenda({ semester, week, day, settings, overrides, onOpen }) {
+  const periods = normalizePeriodTimes(settings.periodTimes);
   const items = occurrencesForWeek(semester, week, overrides)
     .filter((item) => item.meeting.day === day && item.active && !item.meeting.hidden)
     .sort((a, b) => a.meeting.start - b.meeting.start);
@@ -336,7 +338,7 @@ function DayAgenda({ semester, week, day, settings, overrides, onOpen }) {
         {!items.length && <div className="empty-day"><Sparkles /><h3>这天没有课</h3><p>留一点空白，也是一种安排。</p></div>}
         {items.map((item) => (
           <button className="agenda-item" key={item.meeting.id} onClick={() => onOpen(item)}>
-            <div className="agenda-time"><strong>{PERIODS[item.meeting.start - 1][0]}</strong><span>{PERIODS[item.meeting.end - 1][1]}</span></div>
+            <div className="agenda-time"><strong>{periods[item.meeting.start - 1][0]}</strong><span>{periods[item.meeting.end - 1][1]}</span></div>
             <i style={{ background: item.course.color }} />
             <div className="agenda-main"><h3>{item.course.category === '实验' && <em>实验</em>}{item.kind === 'milestone' ? `${item.milestone.type} · ` : ''}{item.course.title}</h3><p><MapPin size={14} />{displayLocation(item.meeting.location, settings.locationMode)}</p><p><UserRound size={14} />{item.course.teacher || '教师待定'}</p></div>
             <ChevronRight size={19} />
@@ -351,13 +353,13 @@ function DayPage({ semester, week, day, settings, overrides, onOpen, className =
   </section>;
 }
 
-function ChoiceSheet({ title, value, options, onSelect, onClose }) {
+function ChoiceSheet({ title, value, options, onSelect, onClose, eyebrow = '请选择' }) {
   useBackHandler(true, onClose);
   return <div className="modal-root" role="dialog" aria-modal="true" aria-label={title}>
     <button className="modal-backdrop" aria-label="关闭选择" onClick={onClose} />
     <section className="bottom-sheet choice-sheet">
       <div className="sheet-handle" />
-      <div className="sheet-heading"><div><span className="eyebrow">偏好设置</span><h2>{title}</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
+      <div className="sheet-heading"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
       <div className="choice-list">
         {options.map((option) => <button className={option.value === value ? 'selected' : ''} key={option.value} onClick={() => { onSelect(option.value); onClose(); }}>
           <span><b>{option.label}</b>{option.description && <small>{option.description}</small>}</span>
@@ -374,7 +376,105 @@ function SettingChoice({ value, onClick }) {
 
 function Field({ label, children, className = '' }) { return <label className={`field ${className}`}><span>{label}</span>{children}</label>; }
 
-function DetailSheet({ selected, semester, week, overrides, onClose, onSave, onDelete, onAddMilestone }) {
+function PickerField({ label, value, onClick, className = '' }) {
+  return <Field label={label} className={className}><button type="button" className="form-select-trigger" onClick={onClick}><span>{value}</span><ChevronDown /></button></Field>;
+}
+
+const padClock = (value) => String(value).padStart(2, '0');
+
+function WheelColumn({ value, values, onChange, label }) {
+  const ref = useRef(null);
+  const frame = useRef(0);
+  const interaction = useRef(false);
+  const settleTimer = useRef(0);
+  const itemHeight = 46;
+  useEffect(() => {
+    const index = Math.max(0, values.indexOf(value));
+    if (ref.current) ref.current.scrollTop = index * itemHeight;
+  }, [value, values]);
+  const onScroll = () => {
+    // WebView dispatches scroll events while the initial scrollTop and
+    // scroll-snap position are settling. Only a real gesture may change time.
+    if (!interaction.current) return;
+    cancelAnimationFrame(frame.current);
+    clearTimeout(settleTimer.current);
+    frame.current = requestAnimationFrame(() => {
+      const index = clamp(Math.round((ref.current?.scrollTop || 0) / itemHeight), 0, values.length - 1);
+      if (values[index] !== value) onChange(values[index]);
+    });
+    settleTimer.current = setTimeout(() => { interaction.current = false; }, 160);
+  };
+  useEffect(() => () => { cancelAnimationFrame(frame.current); clearTimeout(settleTimer.current); }, []);
+  return <div className="time-wheel-column-wrap">
+    <div className="time-wheel-selection" aria-hidden="true" />
+    <div className="time-wheel-column" ref={ref} onScroll={onScroll} onPointerDown={() => { interaction.current = true; }} onWheel={() => { interaction.current = true; }} role="listbox" aria-label={label}>
+      {values.map((option) => <button type="button" role="option" aria-selected={option === value} className={option === value ? 'selected' : ''} key={option} onClick={() => { onChange(option); ref.current?.scrollTo({ top: values.indexOf(option) * itemHeight, behavior: 'smooth' }); }}>{option}</button>)}
+    </div>
+    <span>{label}</span>
+  </div>;
+}
+
+function TimeWheelSheet({ title, value, onSelect, onClose }) {
+  useBackHandler(true, onClose);
+  const [hour, minute] = String(value || '09:00').split(':');
+  const [draftHour, setDraftHour] = useState(padClock(Number(hour) || 0));
+  const [draftMinute, setDraftMinute] = useState(padClock(Number(minute) || 0));
+  const hours = useMemo(() => Array.from({ length: 24 }, (_, index) => padClock(index)), []);
+  const minutes = useMemo(() => Array.from({ length: 60 }, (_, index) => padClock(index)), []);
+  return <div className="modal-root nested-modal" role="dialog" aria-modal="true" aria-label={title}>
+    <button className="modal-backdrop" aria-label="关闭时间选择" onClick={onClose} />
+    <section className="bottom-sheet time-wheel-sheet">
+      <div className="sheet-handle" />
+      <div className="sheet-heading"><div><span className="eyebrow">时间设置</span><h2>{title}</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
+      <div className="time-wheel-stage">
+        <WheelColumn value={draftHour} values={hours} onChange={setDraftHour} label="时" />
+        <strong className="time-wheel-colon">:</strong>
+        <WheelColumn value={draftMinute} values={minutes} onChange={setDraftMinute} label="分" />
+      </div>
+      <div className="sheet-actions"><button className="soft-button" onClick={onClose}>取消</button><button className="primary-button" onClick={() => { onSelect(`${draftHour}:${draftMinute}`); onClose(); }}>完成</button></div>
+    </section>
+  </div>;
+}
+
+function addClockMinutes(value, delta) {
+  const [hour, minute] = String(value).split(':').map(Number);
+  const total = clamp((hour || 0) * 60 + (minute || 0) + delta, 0, 1439);
+  return `${padClock(Math.floor(total / 60))}:${padClock(total % 60)}`;
+}
+
+function PeriodTimeSheet({ value, onSave, onClose }) {
+  useBackHandler(true, onClose);
+  const [draft, setDraft] = useState(() => normalizePeriodTimes(value));
+  const [clockPicker, setClockPicker] = useState(null);
+  const setClock = (index, side, clock) => setDraft((current) => current.map((period, periodIndex) => {
+    if (periodIndex !== index) return period;
+    const next = [...period];
+    next[side] = clock;
+    if (side === 0 && next[1] <= next[0]) next[1] = addClockMinutes(clock, 45);
+    if (side === 1 && next[0] >= next[1]) next[0] = addClockMinutes(clock, -45);
+    return next;
+  }));
+  return <div className="modal-root" role="dialog" aria-modal="true" aria-label="每节课时间">
+    <button className="modal-backdrop" aria-label="关闭时间设置" onClick={onClose} />
+    <section className="bottom-sheet period-time-sheet">
+      <div className="sheet-handle" />
+      <div className="sheet-heading"><div><span className="eyebrow">默认节次</span><h2>每节课时间</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
+      <p className="period-time-note">时间会同步用于周课表、每日课程和课前提醒。</p>
+      <div className="period-time-list">
+        {draft.map(([start, end], index) => <div className="period-time-row" key={index}>
+          <strong>{index + 1}</strong>
+          <button type="button" onClick={() => setClockPicker({ title: `第 ${index + 1} 节 · 上课`, value: start, index, side: 0 })}>{start}</button>
+          <span>—</span>
+          <button type="button" onClick={() => setClockPicker({ title: `第 ${index + 1} 节 · 下课`, value: end, index, side: 1 })}>{end}</button>
+        </div>)}
+      </div>
+      <div className="sheet-actions"><button className="soft-button" onClick={() => setDraft(normalizePeriodTimes(DEFAULT_PERIODS))}>恢复默认</button><button className="primary-button" onClick={() => { onSave(draft); onClose(); }}>保存时间</button></div>
+    </section>
+    {clockPicker && <TimeWheelSheet title={clockPicker.title} value={clockPicker.value} onClose={() => setClockPicker(null)} onSelect={(clock) => setClock(clockPicker.index, clockPicker.side, clock)} />}
+  </div>;
+}
+
+function DetailSheet({ selected, semester, week, periods, overrides, onClose, onSave, onDelete, onAddMilestone }) {
   const course = selected?.course;
   const originalMeeting = selected?.meeting;
   const isNew = selected?.isNew;
@@ -382,6 +482,8 @@ function DetailSheet({ selected, semester, week, overrides, onClose, onSave, onD
   const [scope, setScope] = useState(isNew ? 'all' : 'this');
   const [showMore, setShowMore] = useState(false);
   const [showMilestone, setShowMilestone] = useState(false);
+  const [picker, setPicker] = useState(null);
+  const [timePicker, setTimePicker] = useState(null);
   useBackHandler(true, () => {
     if (showMilestone) setShowMilestone(false);
     else if (showMore) setShowMore(false);
@@ -396,6 +498,12 @@ function DetailSheet({ selected, semester, week, overrides, onClose, onSave, onD
   }));
   const [milestone, setMilestone] = useState({ type: course?.category === '实验' ? '答辩' : '考试', date: '', time: '09:00', location: originalMeeting?.location || '' });
   const set = (name, value) => setForm((current) => ({ ...current, [name]: value }));
+  const openPicker = (title, value, options, onSelect) => setPicker({ title, value: String(value), options, onSelect, eyebrow: '课程编辑' });
+  const typeOptions = ['理论', '实验', '实践'].map((value) => ({ value, label: value, description: value === '实验' ? '与同名理论课使用关联色' : '' }));
+  const dayOptions = WEEKDAYS.map((name, index) => ({ value: String(index + 1), label: `周${name}` }));
+  const periodOptions = periods.map(([start, end], index) => ({ value: String(index + 1), label: `第 ${index + 1} 节`, description: `${start}–${end}` }));
+  const rollCallOptions = ['未知', '不点名', '偶尔点名', '每次点名'].map((value) => ({ value, label: value }));
+  const milestoneOptions = ['考试', '答辩', 'DDL'].map((value) => ({ value, label: value }));
 
   return (
     <div className="modal-root" role="dialog" aria-modal="true">
@@ -418,27 +526,27 @@ function DetailSheet({ selected, semester, week, overrides, onClose, onSave, onD
           {!isNew && !isMilestone && <p className="scope-help">{scope === 'course' ? '地点同步到这门课的全部分散安排；每个安排原有的时间和周次保持不变。' : scope === 'all' ? '修改当前这一组上课安排覆盖的全部周次。' : scope === 'from' ? `只修改当前安排第${week}周及之后的部分。` : '只修改现在选中的这一周。'}</p>}
           <div className="form-grid">
             <Field label="课程名称" className="wide"><input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="课程名称" /></Field>
-            <Field label="类型"><select value={form.category} onChange={(e) => set('category', e.target.value)}><option>理论</option><option>实验</option><option>实践</option></select></Field>
+            <PickerField label="类型" value={form.category} onClick={() => openPicker('课程类型', form.category, typeOptions, (value) => set('category', value))} />
             <Field label="学分"><input inputMode="decimal" value={form.credits} onChange={(e) => set('credits', e.target.value)} placeholder="3.5" /></Field>
             <Field label="教师" className="wide"><input value={form.teacher} onChange={(e) => set('teacher', e.target.value)} placeholder="教师姓名" /></Field>
             <Field label="上课地点" className="wide"><input value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="示例校区/场地:A2-301" /></Field>
-            <Field label="星期"><select value={form.day} onChange={(e) => set('day', Number(e.target.value))}>{WEEKDAYS.map((name, index) => <option value={index + 1} key={name}>周{name}</option>)}</select></Field>
-            <Field label="节次"><div className="inline-inputs"><select value={form.start} onChange={(e) => set('start', Number(e.target.value))}>{PERIODS.map((_, index) => <option value={index + 1} key={index}>第{index + 1}节</option>)}</select><span>至</span><select value={form.end} onChange={(e) => set('end', Number(e.target.value))}>{PERIODS.map((_, index) => <option value={index + 1} key={index}>第{index + 1}节</option>)}</select></div></Field>
+            <PickerField label="星期" value={`周${WEEKDAYS[form.day - 1]}`} onClick={() => openPicker('上课星期', form.day, dayOptions, (value) => set('day', Number(value)))} />
+            <Field label="节次"><div className="inline-picker-inputs"><button type="button" className="form-select-trigger" onClick={() => openPicker('开始节次', form.start, periodOptions, (value) => set('start', Number(value)))}><span>第{form.start}节</span><ChevronDown /></button><span>至</span><button type="button" className="form-select-trigger" onClick={() => openPicker('结束节次', form.end, periodOptions, (value) => set('end', Number(value)))}><span>第{form.end}节</span><ChevronDown /></button></div></Field>
             <Field label="周次" className="wide"><input value={form.weeks} onChange={(e) => set('weeks', e.target.value)} placeholder="1-16 或 1-15单" /></Field>
           </div>
           <button className="disclosure" onClick={() => setShowMore((value) => !value)}><span><Settings2 size={17} />课程详情与颜色</span><ChevronDown className={showMore ? 'rotated' : ''} /></button>
           {showMore && <div className="more-fields reveal">
             <Field label="成绩构成"><textarea value={form.gradeComposition} onChange={(e) => set('gradeComposition', e.target.value)} placeholder="平时 30% · 期末 70%" /></Field>
-            <Field label="点名情况"><select value={form.rollCall} onChange={(e) => set('rollCall', e.target.value)}><option>未知</option><option>不点名</option><option>偶尔点名</option><option>每次点名</option></select></Field>
+            <PickerField label="点名情况" value={form.rollCall} onClick={() => openPicker('点名情况', form.rollCall, rollCallOptions, (value) => set('rollCall', value))} />
             <Field label="备注"><textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="教材、分组、注意事项…" /></Field>
             <div className="color-row">{COLORS.map((color) => <button aria-label={color} className={form.color === color ? 'selected' : ''} style={{ background: color }} onClick={() => set('color', color)} key={color}>{form.color === color && <Check />}</button>)}</div>
           </div>}
           {!isNew && !isMilestone && <>
             <button className="disclosure" onClick={() => setShowMilestone((value) => !value)}><span><GraduationCap size={17} />添加考试 / 答辩 / DDL</span><ChevronDown className={showMilestone ? 'rotated' : ''} /></button>
             {showMilestone && <div className="milestone-form reveal">
-              <select value={milestone.type} onChange={(e) => setMilestone({ ...milestone, type: e.target.value })}><option>考试</option><option>答辩</option><option>DDL</option></select>
+              <button type="button" className="form-select-trigger" onClick={() => openPicker('日程类型', milestone.type, milestoneOptions, (value) => setMilestone((current) => ({ ...current, type: value })))}><span>{milestone.type}</span><ChevronDown /></button>
               <input type="date" value={milestone.date} onChange={(e) => setMilestone({ ...milestone, date: e.target.value })} />
-              <input type="time" value={milestone.time} onChange={(e) => setMilestone({ ...milestone, time: e.target.value })} />
+              <button type="button" className="time-trigger" onClick={() => setTimePicker({ title: `${milestone.type}时间`, value: milestone.time })}><Clock3 /><span>{milestone.time}</span><ChevronRight /></button>
               <input value={milestone.location} onChange={(e) => setMilestone({ ...milestone, location: e.target.value })} placeholder="地点" />
               <button className="soft-button" disabled={!milestone.date} onClick={() => { onAddMilestone(course.id, milestone); setShowMilestone(false); }}>添加到课表</button>
             </div>}
@@ -450,6 +558,8 @@ function DetailSheet({ selected, semester, week, overrides, onClose, onSave, onD
           <button className="primary-button" disabled={!form.title.trim()} onClick={() => onSave(form, scope)}>{isNew ? '添加到课表' : '保存修改'}</button>
         </div>
       </section>
+      {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
+      {timePicker && <TimeWheelSheet title={timePicker.title} value={timePicker.value} onClose={() => setTimePicker(null)} onSelect={(value) => setMilestone((current) => ({ ...current, time: value }))} />}
     </div>
   );
 }
@@ -465,7 +575,8 @@ function ImportPreview({ courses, setCourses }) {
 
 function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) {
   const [step, setStep] = useState('choose');
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [recognitionMode, setRecognitionMode] = useState(state.settings.apiKey ? 'vision' : 'local');
   const [semesterId, setSemesterId] = useState(initialSemesterId === 'new' ? 'new' : state.activeSemesterId);
   const existing = state.semesters.find((item) => item.id === semesterId);
   const [semesterName, setSemesterName] = useState(existing?.name || suggestedSemesterName());
@@ -475,19 +586,43 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
   const [method, setMethod] = useState('');
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
+  const [elapsed, setElapsed] = useState(0);
+  const [picker, setPicker] = useState(null);
   const fileInput = useRef(null);
+  const abortRef = useRef(null);
+  useEffect(() => {
+    if (step !== 'reading') { setElapsed(0); return undefined; }
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [step]);
+  const close = () => { abortRef.current?.abort(); onClose(); };
+  const cancelReading = () => { abortRef.current?.abort(); abortRef.current = null; setStep('choose'); setError('已取消本次识别'); };
   useBackHandler(true, () => {
     if (step === 'review') setStep('choose');
-    else onClose();
+    else if (step === 'reading') cancelReading();
+    else close();
   });
 
-  const begin = async (chosen) => {
-    setFile(chosen); setStep('reading'); setError('');
+  const begin = async (chosenFiles) => {
+    const selectedFiles = Array.from(chosenFiles || []).slice(0, 8);
+    if (!selectedFiles.length) return;
+    if (recognitionMode === 'vision' && !state.settings.apiKey && selectedFiles.every((item) => item.type.startsWith('image/'))) {
+      setError('视觉版面识别需要先在“我的”页面填写 DeepSeek API Key；也可以切换到免费本地 OCR。');
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setFiles(selectedFiles); setStep('reading'); setError(''); setWarning(''); setProgress({ stage: 'prepare', page: 0, total: selectedFiles.length, progress: 0.02, detail: '正在准备解析器' });
     try {
-      const { recognizeScheduleFile } = await import('./importer');
-      const result = await recognizeScheduleFile(chosen, setProgress);
-      setRawText(result.rawText); setCourses(result.courses); setMethod(result.method); setStep('review');
-    } catch (reason) { setError(reason.message || '识别失败'); setStep('choose'); }
+      const { recognizeScheduleFiles } = await import('./importer');
+      const result = await recognizeScheduleFiles(selectedFiles, { apiKey: recognitionMode === 'vision' ? state.settings.apiKey : '', preferVision: recognitionMode === 'vision' }, setProgress, controller.signal);
+      setRawText(result.rawText); setCourses(result.courses); setMethod(result.method); setWarning(result.warning || ''); setStep('review');
+    } catch (reason) {
+      if (reason?.name !== 'AbortError') setError(reason.message || '识别失败');
+      setStep('choose');
+    } finally { if (abortRef.current === controller) abortRef.current = null; }
   };
   const aiRefine = async () => {
     if (!state.settings.apiKey) { setError('请先在“我的”页面保存 DeepSeek API Key'); return; }
@@ -506,35 +641,48 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
       setFirstMonday(mondayOfCurrentWeek());
     }
   };
+  const semesterOptions = state.semesters.map((item) => ({ value: item.id, label: item.name, description: `${item.weekCount} 周 · ${item.courses.length} 门课程` }));
+  const readingTitle = progress?.stage === 'vision' ? `正在理解 ${files.length} 张图片的版面`
+    : progress?.stage === 'vision-prepare' ? `正在准备第 ${progress.page}/${progress.total} 张图片`
+      : progress?.stage === 'fallback' ? '视觉识别不可用，正在安全回退'
+        : progress?.stage === 'ai' ? 'DeepSeek 正在整理字段'
+          : progress?.stage === 'ocr' ? `正在识别第 ${progress.page}/${progress.total} 张`
+            : progress?.stage === 'document' ? '正在读取文档结构' : '正在准备课表识别';
 
   return <div className="modal-root" role="dialog" aria-modal="true">
-    <button className="modal-backdrop" aria-label="关闭" onClick={onClose} />
+    <button className="modal-backdrop" aria-label="关闭" onClick={close} />
     <section className="bottom-sheet import-sheet">
       <div className="sheet-handle" />
-      <div className="sheet-heading"><div><span className="eyebrow">智能导入</span><h2>{step === 'review' ? `确认 ${courses.length} 门课程` : '从课表开始'}</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
+      <div className="sheet-heading"><div><span className="eyebrow">智能导入</span><h2>{step === 'review' ? `确认 ${courses.length} 门课程` : '从课表开始'}</h2></div><IconButton label="关闭" onClick={close}><X /></IconButton></div>
       <div className="sheet-scroll">
         {step === 'choose' && <>
-          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>课表文件或截图都可以</h3><p>支持 PDF、图片、Excel、CSV/TSV、Word DOCX 与常见纯文本文档；解析器只在选择文件后加载，原文件不会上传。</p></div>
+          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>完整课表或连续截图都可以</h3><p>图片可一次选择最多 8 张，并按选择顺序联合识别。PDF、Excel、Word 与文本仍在本地按需解析。</p></div>
           {initialSemesterId === 'new' && <div className="new-semester-intent"><Plus /><div><b>将创建一个独立新学期</b><span>识别完成后设置学期名称与第一周周一。</span></div></div>}
-          <button className="drop-zone" onClick={() => fileInput.current?.click()}><Upload /><span>选择课表文件</span><small>PDF / 图片 · Excel / CSV · DOCX / TXT / MD / JSON</small></button>
-          <input hidden ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => e.target.files[0] && begin(e.target.files[0])} />
+          <div className="recognition-mode" role="group" aria-label="图片识别方式">
+            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>视觉版面识别</b><small>理解行列与跨图衔接 · 需 DeepSeek 余额</small></span></button>
+            <button type="button" className={recognitionMode === 'local' ? 'active' : ''} onClick={() => setRecognitionMode('local')}><FileScan /><span><b>免费本地 OCR</b><small>不上传图片 · 复杂版面能力有限</small></span></button>
+          </div>
+          <button className="drop-zone" onClick={() => fileInput.current?.click()}><Upload /><span>选择课表文件或多张截图</span><small>图片可多选 · PDF / Excel / CSV · DOCX / TXT / MD / JSON</small></button>
+          <input hidden multiple ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => { if (e.target.files.length) begin(e.target.files); e.target.value = ''; }} />
+          {recognitionMode === 'vision' && <p className="privacy-note">视觉模式会把本次选中的图片发送给 DeepSeek；识别结束后 KeXu 不保留图片副本。</p>}
           {error && <p className="error-text">{error}</p>}
         </>}
-        {step === 'reading' && <div className="reading-state"><div className="scan-animation"><FileScan /><i /></div><h3>{progress?.stage === 'ai' ? 'DeepSeek 正在整理字段' : progress?.stage === 'ocr' ? `正在识别第 ${progress.page}/${progress.total} 页` : progress?.stage === 'document' ? '正在读取文档结构' : '正在读取课表结构'}</h3><p>{file?.name}</p><div className="progress"><i style={{ width: `${Math.max(8, (progress?.progress || 0.1) * 100)}%` }} /></div><small>{progress?.stage === 'ocr' ? '首次使用本地 OCR 时会下载免费的中文识别模型' : '解析仅在本次导入期间运行'}</small></div>}
+        {step === 'reading' && <div className="reading-state"><div className={`scan-animation ${progress?.stage?.startsWith('vision') ? 'vision-scan' : ''}`}>{progress?.stage?.startsWith('vision') ? <Sparkles /> : <FileScan />}<i /></div><h3>{readingTitle}</h3><p>{files.map((item) => item.name).join(' · ')}</p><div className="progress"><i style={{ width: `${Math.max(5, Math.min(100, (progress?.progress || 0.02) * 100))}%` }} /></div><small>{progress?.detail || (progress?.stage === 'ocr' ? '首次使用会下载免费的中文识别模型，请保持应用在前台' : '解析器只在本次导入期间运行')} · {elapsed} 秒</small><button className="cancel-reading" onClick={cancelReading}>取消识别</button></div>}
         {step === 'review' && <>
           <div className="recognition-summary"><Check /><div><b>{method}</b><span>请确认课程名、周次和地点后再保存</span></div></div>
+          {warning && <div className="recognition-warning"><Sparkles /><span>{warning}</span></div>}
           <div className="semester-form">
             <div className="semester-target-tabs" role="group" aria-label="课表保存方式">
               <button className={semesterId !== 'new' ? 'active' : ''} onClick={() => chooseSemesterTarget(state.activeSemesterId)}>合并到已有学期</button>
               <button className={semesterId === 'new' ? 'active' : ''} onClick={() => chooseSemesterTarget('new')}>＋ 新建学期</button>
             </div>
-            {semesterId !== 'new' && <Field label="已有学期" className="semester-existing"><select value={semesterId} onChange={(e) => chooseSemesterTarget(e.target.value)}>{state.semesters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>}
+            {semesterId !== 'new' && <PickerField label="已有学期" className="semester-existing" value={state.semesters.find((item) => item.id === semesterId)?.name || '选择学期'} onClick={() => setPicker({ title: '选择导入学期', value: semesterId, options: semesterOptions, onSelect: chooseSemesterTarget, eyebrow: '课表保存位置' })} />}
             <Field label={semesterId === 'new' ? '新学期名称' : '学期名称'}><input value={semesterName} onChange={(e) => setSemesterName(e.target.value)} placeholder="2026-2027 第1学期" /></Field>
             <Field label="第一周周一"><input type="date" value={firstMonday} onChange={(e) => setFirstMonday(e.target.value)} /></Field>
             {semesterId === 'new' && <p className="semester-target-note">导入后会创建独立学期，不会覆盖当前学期的课程和手动修改。</p>}
           </div>
           <ImportPreview courses={courses} setCourses={setCourses} />
-          {!courses.length && <div className="empty-recognition"><p>本地规则没有可靠拆出课程。可以复制下方 OCR 文本手动检查，或让 DeepSeek 只做一次结构化整理。</p></div>}
+          {!courses.length && <div className="empty-recognition"><p>当前结果没有可靠拆出课程。复杂截图建议重新选择“视觉版面识别”；本地 OCR 结果也可以继续交给 DeepSeek 做文字结构校对。</p></div>}
           <button className="ai-button" onClick={aiRefine}><Sparkles />用 DeepSeek 校对结构<span>可选</span></button>
           <details className="raw-text"><summary>查看 OCR 原文</summary><textarea value={rawText} onChange={(e) => setRawText(e.target.value)} /></details>
           {error && <p className="error-text">{error}</p>}
@@ -542,6 +690,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
       </div>
       {step === 'review' && <div className="sheet-actions"><button className="secondary-button" onClick={() => setStep('choose')}>重新选择</button><button className="primary-button" disabled={!courses.length || !firstMonday || !semesterName} onClick={() => onCommit({ semesterId, semesterName, firstMonday, courses })}>导入并合并</button></div>}
     </section>
+    {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
   </div>;
 }
 
@@ -557,6 +706,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
   const settings = state.settings;
   const wallpaperInput = useRef(null);
   const [picker, setPicker] = useState(null);
+  const [timeSheet, setTimeSheet] = useState(false);
   const update = (patch) => setState((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
   const downloadBackup = () => { const url = URL.createObjectURL(exportState(state)); const anchor = document.createElement('a'); anchor.href = url; anchor.download = backupFileName(toISODate(TODAY)); anchor.click(); URL.revokeObjectURL(url); };
   const locationOptions = [
@@ -586,6 +736,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
         <div className="setting-row"><div><b>课程卡片字号</b><span>课程名、标签和地点会一起调整</span></div><SettingChoice value={labelFor(fontSizeOptions, normalizeWeekFontSize(settings.weekFontSize))} onClick={() => openPicker('课程卡片字号', normalizeWeekFontSize(settings.weekFontSize), fontSizeOptions, (value) => update({ weekFontSize: normalizeWeekFontSize(value) }))} /></div>
         <div className="setting-row"><div><b>显示非本周课程</b><span>只用课程色条提示时段占用</span></div><button className={`switch ${settings.showInactive ? 'on' : ''}`} onClick={() => update({ showInactive: !settings.showInactive })}><i /></button></div>
     </div></section>
+    <section className="settings-group"><h2>上课时间</h2><div className="setting-card compact"><button className="setting-action" onClick={() => setTimeSheet(true)}><Clock3 /><span><b>每节课时间</b><small>自定义 1–12 节的上课与下课时间</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>外观</h2><div className="setting-card"><div className="setting-row"><div><b>界面主题</b><span>可随使用场景选择浅色或暗色</span></div><SettingChoice value={labelFor(themeOptions, settings.theme || 'light')} onClick={() => openPicker('界面主题', settings.theme || 'light', themeOptions, (value) => update({ theme: value }))} /></div></div></section>
     <section className="settings-group"><h2>上课提醒</h2><div className="setting-card">
       <div className="setting-row"><div><b>课前提醒与倒计时</b><span>通知中直接显示课程、时间和完整地址</span></div><button className={`switch ${settings.remindersEnabled ? 'on' : ''}`} onClick={() => onReminderToggle(!settings.remindersEnabled)}><i /></button></div>
@@ -610,11 +761,12 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
         <button className="text-button danger-text" onClick={() => update({ wallpaper: '' })}><Trash2 size={15} />移除壁纸</button>
       </>}
     </div></section>
-    <section className="settings-group"><h2>可选智能校对</h2><div className="setting-card"><div className="api-field"><div><b>DeepSeek API Key</b><span>仅在你主动点击“校对结构”时调用</span></div><input type="password" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value.trim() })} placeholder="sk-…" /></div></div></section>
+    <section className="settings-group"><h2>可选视觉识别</h2><div className="setting-card"><div className="api-field"><div><b>DeepSeek API Key</b><span>仅在你主动选择“视觉识别”或“校对结构”时调用；402 表示账户余额不足</span></div><input type="password" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value.trim() })} placeholder="sk-…" /></div></div></section>
     <section className="settings-group"><h2>数据</h2><div className="setting-card compact"><button className="setting-action" onClick={downloadBackup}><Download /><span><b>导出完整备份</b><small>课程、修改与设置</small></span><ChevronRight /></button></div></section>
     <p className="version-note">{APP_NAME} {APP_VERSION} · 让摸鱼更高效，坐牢更舒心</p>
   </main>
   {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
+  {timeSheet && <PeriodTimeSheet value={settings.periodTimes} onClose={() => setTimeSheet(false)} onSave={(periodTimes) => update({ periodTimes: normalizePeriodTimes(periodTimes) })} />}
   </>;
 }
 
@@ -629,6 +781,7 @@ function BottomNav({ view, setView }) {
 export default function App() {
   const [state, setState] = useState(loadState);
   const semester = state.semesters.find((item) => item.id === state.activeSemesterId) || state.semesters[0];
+  const periods = useMemo(() => normalizePeriodTimes(state.settings.periodTimes), [state.settings.periodTimes]);
   const [week, setWeek] = useState(() => clamp(currentAcademicWeek(semester.firstMonday), 1, semester.weekCount));
   const [day, setDay] = useState(() => clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7));
   const [view, setView] = useState('week');
@@ -864,7 +1017,7 @@ export default function App() {
             if (pageWeek < 1 || pageWeek > semester.weekCount) return null;
             return <section className={`week-body-page carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} key={pageWeek} style={{ '--page-base': `${slot * 100}%` }}><WeekGrid semester={semester} week={pageWeek} settings={state.settings} overrides={state.overrides} onOpen={slot === 0 ? ((value) => value.items ? openSlotGroup(value) : openOccurrence(value)) : () => {}} onAdd={slot === 0 ? addAt : () => {}} /></section>;
           })}
-          <PeriodRail />
+          <PeriodRail periods={periods} />
         </div>
       </div>
     </div>}
@@ -887,8 +1040,8 @@ export default function App() {
     </div>}
     {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} reminderStatus={reminderStatus} />}
     <BottomNav view={view} setView={setView} />
-    {slotGroup && <SlotSheet group={slotGroup} week={week} locationMode={state.settings.locationMode} onClose={() => setSlotGroup(null)} onChoose={(item) => { setSlotGroup(null); openOccurrence(item); }} />}
-    {selected && <DetailSheet key={`${selected.meeting?.id}-${week}`} selected={selected} semester={semester} week={week} overrides={state.overrides} onClose={() => setSelected(null)} onSave={saveDetail} onDelete={deleteDetail} onAddMilestone={addMilestone} />}
+    {slotGroup && <SlotSheet group={slotGroup} week={week} locationMode={state.settings.locationMode} periods={periods} onClose={() => setSlotGroup(null)} onChoose={(item) => { setSlotGroup(null); openOccurrence(item); }} />}
+    {selected && <DetailSheet key={`${selected.meeting?.id}-${week}`} selected={selected} semester={semester} week={week} periods={periods} overrides={state.overrides} onClose={() => setSelected(null)} onSave={saveDetail} onDelete={deleteDetail} onAddMilestone={addMilestone} />}
     {weekPicking && <WeekPicker semester={semester} week={week} currentWeek={currentAcademicWeek(semester.firstMonday)} onClose={() => setWeekPicking(false)} onSelect={(value) => { navigateWeek(value, true); setWeekPicking(false); }} />}
     {importing && <ImportSheet state={state} initialSemesterId={importing} onClose={() => setImporting(false)} onCommit={commitImport} />}
     {toast && <div className="toast"><Check />{toast}</div>}

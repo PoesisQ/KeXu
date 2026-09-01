@@ -14,6 +14,7 @@ const viewport = read('index.html');
 const buildGradle = read('android/app/build.gradle');
 const gitignore = read('.gitignore');
 const documentImporter = read('src/documentImporter.js');
+const importer = read('src/importer.js');
 
 const checks = [
   ['WebView 文字缩放锁定', css.includes('-webkit-text-size-adjust: 100%') && css.includes('text-size-adjust: 100%')],
@@ -32,6 +33,9 @@ const checks = [
   ['运行时移除 OEM 标题栏', mainActivity.includes('getSupportActionBar()') && mainActivity.includes('action_bar_container')],
   ['签名配置与源码解耦', buildGradle.includes("rootProject.file('signing.properties')") && gitignore.includes('android/signing.properties')],
   ['文档解析器按需加载', documentImporter.includes("import('xlsx')") && documentImporter.includes("import('mammoth')")],
+  ['多图视觉模型按需调用', importer.includes('deepseek-v4-flash-vision-exp') && app.includes('multiple ref={fileInput}')],
+  ['课程编辑不再使用原生下拉', !app.includes('<select') && app.includes('form-select-trigger')],
+  ['自定义节次时间进入提醒链路', app.includes('PeriodTimeSheet') && read('src/reminders.js').includes('settings?.periodTimes')],
   ['安全区 viewport', viewport.includes('viewport-fit=cover')]
 ];
 

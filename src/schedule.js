@@ -1,8 +1,24 @@
-export const PERIODS = [
+export const DEFAULT_PERIODS = [
   ['08:50', '09:35'], ['09:40', '10:25'], ['10:40', '11:25'], ['11:30', '12:15'],
   ['14:00', '14:45'], ['14:50', '15:35'], ['15:45', '16:30'], ['16:35', '17:20'],
   ['19:00', '19:45'], ['19:55', '20:40'], ['20:50', '21:35'], ['21:40', '22:25']
 ];
+
+// Kept as a stable export for existing callers and third-party imports.
+export const PERIODS = DEFAULT_PERIODS;
+
+const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+export function normalizePeriodTimes(value) {
+  if (!Array.isArray(value) || value.length !== DEFAULT_PERIODS.length) return DEFAULT_PERIODS.map((period) => [...period]);
+  return value.map((period, index) => {
+    const fallback = DEFAULT_PERIODS[index];
+    if (!Array.isArray(period)) return [...fallback];
+    const start = CLOCK_PATTERN.test(String(period[0] || '')) ? String(period[0]) : fallback[0];
+    const end = CLOCK_PATTERN.test(String(period[1] || '')) ? String(period[1]) : fallback[1];
+    return [start, end];
+  });
+}
 
 export const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
@@ -80,9 +96,10 @@ export function isMeetingActive(meeting, week) {
   return parseWeekSpec(meeting.weeks).includes(Number(week));
 }
 
-export function formatPeriodRange(start, end) {
-  const first = PERIODS[start - 1] || PERIODS[0];
-  const last = PERIODS[end - 1] || first;
+export function formatPeriodRange(start, end, periods = DEFAULT_PERIODS) {
+  const normalized = normalizePeriodTimes(periods);
+  const first = normalized[start - 1] || normalized[0];
+  const last = normalized[end - 1] || first;
   return `${first[0]}-${last[1]}`;
 }
 

@@ -1,5 +1,6 @@
 import { BUNDLED_SEMESTERS, COLORS, makeInitialState, normalizeWeekFontSize } from './data';
 import { normalizeCourseTitle } from './textNormalization';
+import { normalizePeriodTimes } from './schedule';
 
 const STORAGE_KEY = 'kexu-state-v1';
 
@@ -76,7 +77,8 @@ export function loadState() {
         settings: {
           ...initial.settings,
           ...saved.settings,
-          weekFontSize: normalizeWeekFontSize(saved.settings?.weekFontSize)
+          weekFontSize: normalizeWeekFontSize(saved.settings?.weekFontSize),
+          periodTimes: normalizePeriodTimes(saved.settings?.periodTimes)
         }
       };
     }

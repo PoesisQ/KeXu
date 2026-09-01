@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cardLocationLayout, displayLocation, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, parseWeekSpec, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
-import { parseRecognizedText } from './importer';
+import { cardLocationLayout, displayLocation, formatPeriodRange, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, normalizePeriodTimes, parseWeekSpec, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
+import { deepSeekErrorMessage, parseRecognizedText } from './importer';
 import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
 import { loadState } from './storage';
@@ -18,6 +18,15 @@ describe('week specifications', () => {
       { ...meeting, weeks: [1, 2] },
       { ...meeting, id: 'm1-w3', weeks: [3, 4], location: 'B' }
     ]);
+  });
+});
+
+describe('custom class times', () => {
+  it('normalizes damaged saved values and formats custom periods', () => {
+    const periods = normalizePeriodTimes(Array.from({ length: 12 }, (_, index) => index === 0 ? ['09:05', '09:50'] : ['bad', 'bad']));
+    expect(periods[0]).toEqual(['09:05', '09:50']);
+    expect(periods[1]).toEqual(['09:40', '10:25']);
+    expect(formatPeriodRange(1, 2, periods)).toBe('09:05-10:25');
   });
 });
 
@@ -87,6 +96,10 @@ describe('momentum gestures', () => {
 });
 
 describe('imports', () => {
+  it('explains DeepSeek balance errors instead of exposing a bare status code', () => {
+    expect(deepSeekErrorMessage(402)).toContain('账户余额不足');
+    expect(deepSeekErrorMessage(401)).toContain('API Key');
+  });
   it('extracts a common timetable block', () => {
     const text = '示例课程 (2-4节) 1-4周,7-9周/校区:示例校区/场地:A2-301/教师:陈老师/学分:3.5';
     const [course] = parseRecognizedText(text);
@@ -179,5 +192,13 @@ describe('demo state and reminders', () => {
     const reminder = buildReminderPayload(state, now).find((item) => item.id === 'demo-2026-autumn-demo-data-tue-1');
     expect(reminder.notifyAt).toBe(reminder.startAt - 10 * 60_000);
     expect(reminder.location).toContain('A2-301');
+  });
+
+  it('uses custom period times for notifications', () => {
+    const state = makeInitialState();
+    state.settings.periodTimes[1] = ['10:00', '10:45'];
+    const now = new Date(2026, 7, 31, 0, 0).getTime();
+    const reminder = buildReminderPayload(state, now).find((item) => item.id === 'demo-2026-autumn-demo-data-tue-1');
+    expect(reminder.startClock).toBe('10:00');
   });
 });

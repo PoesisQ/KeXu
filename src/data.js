@@ -83,6 +83,11 @@ export function makeInitialState() {
       wallpaperBrightness: 1,
       wallpaperBlur: 0,
       apiKey: '',
+      periodTimes: [
+        ['08:50', '09:35'], ['09:40', '10:25'], ['10:40', '11:25'], ['11:30', '12:15'],
+        ['14:00', '14:45'], ['14:50', '15:35'], ['15:45', '16:30'], ['16:35', '17:20'],
+        ['19:00', '19:45'], ['19:55', '20:40'], ['20:50', '21:35'], ['21:40', '22:25']
+      ],
       remindersEnabled: false,
       reminderMinutes: 10
     }
