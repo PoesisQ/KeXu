@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayLocation, groupOverlappingOccurrences, mergeImportedSemester, parseWeekSpec, splitMeetingFromWeek } from './schedule';
+import { cardLocationLayout, displayLocation, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, parseWeekSpec, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
 import { parseRecognizedText } from './importer';
 import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
@@ -23,6 +23,18 @@ describe('week specifications', () => {
 describe('location display', () => {
   it('can retain only the room', () => {
     expect(displayLocation('示例校区/场地:A2-301', 'room')).toBe('A2-301');
+  });
+
+  it('adds optional wrap points for room, campus and mixed-format addresses', () => {
+    expect(locationWrapParts('F3-a315')).toEqual([
+      { text: 'F3', breakAfter: false }, { text: '-', breakAfter: true }, { text: 'a315', breakAfter: false }
+    ]);
+    expect(locationWrapParts('广州国际校区 · F3-a315').filter((part) => part.breakAfter).map((part) => part.text)).toEqual(['·', '-']);
+    expect(locationWrapParts('North Campus/Science Center-A315').filter((part) => part.breakAfter).map((part) => part.text)).toEqual(['/', '-']);
+    expect(cardLocationLayout('广州国际校区/场地:F3-a315', 'full')).toEqual({ text: 'F3-a315', context: '广州国际校区' });
+    expect(cardLocationLayout('North Campus/Science Center-A315', 'full')).toEqual({ text: 'A315', context: 'North Campus · Science Center' });
+    expect(shouldForceRoomWrap('F3-a315')).toBe(true);
+    expect(shouldForceRoomWrap('A2-301')).toBe(false);
   });
 });
 

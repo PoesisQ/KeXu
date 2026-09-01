@@ -89,8 +89,8 @@ export function formatPeriodRange(start, end) {
 export function roomOnly(location = '') {
   const explicit = location.match(/(?:场地|教室)\s*[:：]?\s*([^/，,]+)/i);
   if (explicit) return explicit[1].trim();
-  const room = location.match(/(?:[A-Z]\d?[-－]?[a-zA-Z]?\d{2,4}|[东西南北]?\d+[A-Z]?[-－]\d+|未排地点)$/i);
-  return room ? room[0].replace('－', '-') : location.replace(/^.*(?:校区|园区)\s*/i, '').trim();
+  const room = location.match(/(?:^|[\s/，,·:：-])((?:[A-Z]\d?[-－]?[a-zA-Z]?\d{2,4}|[东西南北]?\d+[A-Z]?[-－]\d+|未排地点))$/i);
+  return room ? room[1].replace('－', '-') : location.replace(/^.*(?:校区|园区)\s*/i, '').trim();
 }
 
 export function campusOnly(location = '') {
@@ -103,6 +103,27 @@ export function displayLocation(location, mode = 'room') {
   if (mode === 'full') return location.replace(/(?:校区|场地|教室)\s*[:：]\s*/g, '').replace(/\//g, ' · ');
   if (mode === 'campus') return campusOnly(location);
   return roomOnly(location);
+}
+
+const LOCATION_WRAP_SEPARATOR = /^[-－–—/／·・,，;；|｜]$/;
+
+export function locationWrapParts(location = '') {
+  return String(location).trim().split(/([-－–—/／·・,，;；|｜])/).filter(Boolean)
+    .map((text) => ({ text, breakAfter: LOCATION_WRAP_SEPARATOR.test(text) }));
+}
+
+export function cardLocationLayout(location, mode = 'room') {
+  const text = displayLocation(location, mode);
+  if (mode !== 'full') return { text, context: '' };
+  const room = roomOnly(location);
+  if (!room || room === location || !text.endsWith(room)) return { text, context: '' };
+  const context = text.slice(0, -room.length).replace(/[-－–—/／·・,，;；|｜\s]+$/g, '').trim();
+  return context ? { text: room, context } : { text, context: '' };
+}
+
+export function shouldForceRoomWrap(location = '') {
+  const text = String(location).trim();
+  return text.length >= 7 && /^[A-Z0-9]{1,4}[-－][A-Z0-9]{3,}$/i.test(text);
 }
 
 export function meetingKey(meetingId, week) {

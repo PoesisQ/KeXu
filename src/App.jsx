@@ -3,15 +3,15 @@ import { App as NativeApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import {
   BellRing, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, FileScan,
-  GraduationCap, Image as ImageIcon, LayoutGrid, MapPin, MoreHorizontal, Palette, Plus, RotateCcw,
+  GraduationCap, Image as ImageIcon, LayoutGrid, MapPin, MoreHorizontal, Palette, Plus,
   Settings2, Sparkles, Trash2, Upload, UserRound, X
 } from 'lucide-react';
 import { COLORS } from './data';
 import { APP_NAME, APP_VERSION, backupFileName } from './config';
 import {
-  PERIODS, WEEKDAYS, addDays, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
-  formatWeekSpec, groupOverlappingOccurrences, isMeetingActive, meetingKey, mergeImportedSemester, occurrencesForWeek, parseWeekSpec,
-  resolveMeeting, splitMeetingFromWeek, toISODate
+  PERIODS, WEEKDAYS, addDays, cardLocationLayout, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
+  formatWeekSpec, groupOverlappingOccurrences, isMeetingActive, locationWrapParts, meetingKey, mergeImportedSemester, occurrencesForWeek, parseWeekSpec,
+  resolveMeeting, shouldForceRoomWrap, splitMeetingFromWeek, toISODate
 } from './schedule';
 import { exportState, loadState, saveState } from './storage';
 import { getReminderStatus, openReminderSettings, remindersAvailable, requestReminderAccess, syncNativeReminders } from './reminders';
@@ -21,6 +21,18 @@ import { backStack } from './backNavigation';
 
 const TODAY = new Date();
 const shortDate = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' });
+function CardLocation({ value, context = '', lines = 2, className = 'card-location', icon = true }) {
+  const text = String(value || '地点待定').trim();
+  const fullText = context ? `${context} · ${text}` : text;
+  const forceRoomWrap = lines > 1 && !context && shouldForceRoomWrap(text);
+  const renderText = (content) => locationWrapParts(content).map((part, index) => <React.Fragment key={`${part.text}-${index}`}>
+    {part.text}{part.breakAfter && (forceRoomWrap && /^[-－]$/.test(part.text) ? <br /> : <wbr />)}
+  </React.Fragment>);
+  return <span className={`${className} location-lines-${lines} ${context ? 'location-stacked' : ''}`} title={fullText}>
+    {icon && <MapPin size={10} />}
+    {context ? <><span className="location-context">{context}</span><span className="location-room">{text}</span></> : renderText(text)}
+  </span>;
+}
 
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
 function uid(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
@@ -91,7 +103,9 @@ function CourseCard({ item, week, locationMode, onOpen }) {
   const { course, meeting, active, kind, milestone } = item;
   const lab = course.category === '实验';
   const title = kind === 'milestone' ? `${milestone.type} · ${course.title}` : course.title;
-  const locationLabel = displayLocation(meeting.location, locationMode).replaceAll('-', '‑');
+  const locationLabel = displayLocation(meeting.location, locationMode);
+  const locationLayout = cardLocationLayout(meeting.location, locationMode);
+  const locationLines = meeting.end - meeting.start + 1 >= 2 ? 2 : 1;
   if (!active && kind === 'course') return (
     <button
       className="course-card inactive inactive-strip-card"
@@ -99,9 +113,10 @@ function CourseCard({ item, week, locationMode, onOpen }) {
       onClick={(event) => { event.stopPropagation(); onOpen(item); }}
       aria-label={`${lab ? '实验 ' : ''}${course.title} ${locationLabel} 非本周`}
     >
+      <span className="card-accent" aria-hidden="true" />
       <span className="inactive-strip-heading">非本周</span>
       <span className="inactive-color-strip" style={{ '--strip-color': course.color }} aria-hidden="true" />
-      <span className="inactive-strip-location">{locationLabel}</span>
+      <CardLocation value={locationLayout.text} context={locationLayout.context} lines={locationLines} className="inactive-strip-location" icon={false} />
     </button>
   );
   return (
@@ -116,7 +131,7 @@ function CourseCard({ item, week, locationMode, onOpen }) {
         {kind === 'milestone' && <b className="type-tag warm">{milestone.type}</b>}
         {title}
       </span>
-      <span className="card-location"><MapPin size={10} />{locationLabel}</span>
+      <CardLocation value={locationLayout.text} context={locationLayout.context} lines={locationLines} />
       {!active && <span className="inactive-label">非本周</span>}
       {active && isMeetingActive(meeting, week) && <span className="active-dot" />}
     </button>
@@ -127,6 +142,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
   const activeItems = group.items.filter((item) => item.active);
   const primary = activeItems[0] || group.items[0];
   const { course, meeting } = primary;
+  const locationLayout = cardLocationLayout(meeting.location, locationMode);
   const active = activeItems.length > 0;
   const inactiveItems = group.items.filter((item) => !item.active);
   if (!active) return (
@@ -136,6 +152,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
       onClick={(event) => { event.stopPropagation(); onOpen(group); }}
       aria-label={`非本周课程，同一时段共${group.items.length}个安排，点开查看全部`}
     >
+      <span className="card-accent" aria-hidden="true" />
       <span className="inactive-strip-heading">非本周</span>
       <span className="inactive-color-list" aria-hidden="true">
         {group.items.slice(0, 5).map((item) => <span className="inactive-color-strip" style={{ '--strip-color': item.course.color }} key={`${item.course.id}-${item.meeting.id}`} />)}
@@ -159,7 +176,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
       {!!inactiveItems.length && <span className="inactive-color-list compact" aria-hidden="true">
         {inactiveItems.slice(0, 3).map((item) => <span className="inactive-color-strip" style={{ '--strip-color': item.course.color }} key={`${item.course.id}-${item.meeting.id}`} />)}
       </span>}
-      <span className="card-location"><MapPin size={10} />{displayLocation(meeting.location, locationMode).replaceAll('-', '‑')}</span>
+      <CardLocation value={locationLayout.text} context={locationLayout.context} lines={group.end - group.start + 1 >= 2 ? 2 : 1} />
       {!active && <span className="inactive-label">非本周</span>}
     </button>
   );
@@ -282,8 +299,8 @@ function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday }) {
       <div className="day-hero-actions">
         <div className="today-control" aria-hidden={!onToday}>
           {onToday && todayPages.map(({ className, meta, interactive }) => meta && toISODate(meta.date) !== toISODate(TODAY) && (interactive
-            ? <button className={`soft-button today-button today-visual ${className}`} key={className} onClick={onToday}><RotateCcw size={16} />回到今天</button>
-            : <span className={`soft-button today-button today-visual ${className}`} key={className} aria-hidden="true"><RotateCcw size={16} />回到今天</span>))}
+            ? <button className={`soft-button today-button today-visual ${className}`} key={className} onClick={onToday}>回到今天</button>
+            : <span className={`soft-button today-button today-visual ${className}`} key={className} aria-hidden="true">回到今天</span>))}
         </div>
         <button className="soft-button" onClick={() => onAdd(current.day, 1)}><Plus size={18} />添加</button>
       </div>
