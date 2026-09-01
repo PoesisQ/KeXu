@@ -1,4 +1,4 @@
-import { BUNDLED_SEMESTERS, COLORS, makeInitialState } from './data';
+import { BUNDLED_SEMESTERS, COLORS, makeInitialState, normalizeWeekFontSize } from './data';
 
 const STORAGE_KEY = 'kexu-state-v1';
 
@@ -66,7 +66,18 @@ export function loadState() {
       const activeSemesterId = semesters.some((semester) => semester.id === saved.activeSemesterId)
         ? saved.activeSemesterId
         : semesters[0].id;
-      return { ...initial, ...saved, activeSemesterId, version: initial.version, semesters, settings: { ...initial.settings, ...saved.settings } };
+      return {
+        ...initial,
+        ...saved,
+        activeSemesterId,
+        version: initial.version,
+        semesters,
+        settings: {
+          ...initial.settings,
+          ...saved.settings,
+          weekFontSize: normalizeWeekFontSize(saved.settings?.weekFontSize)
+        }
+      };
     }
   } catch {
     // Damaged local data should never prevent opening the timetable.

@@ -6,7 +6,7 @@ import {
   GraduationCap, Image as ImageIcon, LayoutGrid, MapPin, MoreHorizontal, Palette, Plus,
   Settings2, Sparkles, Trash2, Upload, UserRound, X
 } from 'lucide-react';
-import { COLORS } from './data';
+import { COLORS, normalizeWeekFontSize } from './data';
 import { APP_NAME, APP_VERSION, backupFileName } from './config';
 import {
   PERIODS, WEEKDAYS, addDays, cardLocationLayout, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
@@ -105,10 +105,12 @@ function CourseCard({ item, week, locationMode, onOpen }) {
   const title = kind === 'milestone' ? `${milestone.type} · ${course.title}` : course.title;
   const locationLabel = displayLocation(meeting.location, locationMode);
   const locationLayout = cardLocationLayout(meeting.location, locationMode);
-  const locationLines = meeting.end - meeting.start + 1 >= 2 ? 2 : 1;
+  const periodSpan = meeting.end - meeting.start + 1;
+  const locationLines = periodSpan >= 2 ? 2 : 1;
   if (!active && kind === 'course') return (
     <button
       className="course-card inactive inactive-strip-card"
+      data-periods={periodSpan}
       style={{ '--course': course.color, top: `${(meeting.start - 1) * 58 + 4}px`, height: `${(meeting.end - meeting.start + 1) * 58 - 7}px` }}
       onClick={(event) => { event.stopPropagation(); onOpen(item); }}
       aria-label={`${lab ? '实验 ' : ''}${course.title} ${locationLabel} 非本周`}
@@ -122,6 +124,7 @@ function CourseCard({ item, week, locationMode, onOpen }) {
   return (
     <button
       className={`course-card ${active ? '' : 'inactive'} ${kind === 'milestone' ? 'milestone-card' : ''}`}
+      data-periods={periodSpan}
       style={{ '--course': course.color, top: `${(meeting.start - 1) * 58 + 4}px`, height: `${(meeting.end - meeting.start + 1) * 58 - 7}px` }}
       onClick={(event) => { event.stopPropagation(); onOpen(item); }}
     >
@@ -144,10 +147,12 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
   const { course, meeting } = primary;
   const locationLayout = cardLocationLayout(meeting.location, locationMode);
   const active = activeItems.length > 0;
+  const periodSpan = group.end - group.start + 1;
   const inactiveItems = group.items.filter((item) => !item.active);
   if (!active) return (
     <button
       className="course-card inactive inactive-strip-card inactive-group-card"
+      data-periods={periodSpan}
       style={{ '--course': course.color, top: `${(group.start - 1) * 58 + 4}px`, height: `${(group.end - group.start + 1) * 58 - 7}px` }}
       onClick={(event) => { event.stopPropagation(); onOpen(group); }}
       aria-label={`非本周课程，同一时段共${group.items.length}个安排，点开查看全部`}
@@ -163,6 +168,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
   return (
     <button
       className={`course-card slot-group-card ${active ? '' : 'inactive'}`}
+      data-periods={periodSpan}
       style={{ '--course': course.color, top: `${(group.start - 1) * 58 + 4}px`, height: `${(group.end - group.start + 1) * 58 - 7}px` }}
       onClick={(event) => { event.stopPropagation(); onOpen(group); }}
       aria-label={`${active ? '本周课程' : '非本周课程'}，同一时段共${group.items.length}个安排，点开查看全部`}
@@ -559,6 +565,11 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
     { value: 'light', label: '浅色', description: '明亮、柔和的日间界面' },
     { value: 'dark', label: '暗色', description: '降低夜间使用时的亮度' }
   ];
+  const fontSizeOptions = [
+    { value: 'compact', label: '紧凑', description: '显示更多文字，适合小屏幕' },
+    { value: 'standard', label: '标准', description: '清晰度与信息量保持平衡' },
+    { value: 'large', label: '较大', description: '课程名、标签和地点更醒目' }
+  ];
   const semesterOptions = state.semesters.map((item) => ({ value: item.id, label: item.name, description: `${item.weekCount} 周 · ${item.courses.length} 门课程` }));
   const labelFor = (options, value) => options.find((option) => String(option.value) === String(value))?.label || '';
   const openPicker = (title, value, options, onSelect) => setPicker({ title, value: String(value), options, onSelect });
@@ -568,6 +579,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onReminderTog
     <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => openPicker('选择学期', state.activeSemesterId, semesterOptions, onSemester)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>周课表显示</h2><div className="setting-card">
       <div className="setting-row"><div><b>地点显示</b><span>完整地址仍保留在详情中</span></div><SettingChoice value={labelFor(locationOptions, settings.locationMode)} onClick={() => openPicker('地点显示', settings.locationMode, locationOptions, (value) => update({ locationMode: value }))} /></div>
+        <div className="setting-row"><div><b>课程卡片字号</b><span>课程名、标签和地点会一起调整</span></div><SettingChoice value={labelFor(fontSizeOptions, normalizeWeekFontSize(settings.weekFontSize))} onClick={() => openPicker('课程卡片字号', normalizeWeekFontSize(settings.weekFontSize), fontSizeOptions, (value) => update({ weekFontSize: normalizeWeekFontSize(value) }))} /></div>
         <div className="setting-row"><div><b>显示非本周课程</b><span>只用课程色条提示时段占用</span></div><button className={`switch ${settings.showInactive ? 'on' : ''}`} onClick={() => update({ showInactive: !settings.showInactive })}><i /></button></div>
     </div></section>
     <section className="settings-group"><h2>外观</h2><div className="setting-card"><div className="setting-row"><div><b>界面主题</b><span>可随使用场景选择浅色或暗色</span></div><SettingChoice value={labelFor(themeOptions, settings.theme || 'light')} onClick={() => openPicker('界面主题', settings.theme || 'light', themeOptions, (value) => update({ theme: value }))} /></div></div></section>
@@ -816,7 +828,7 @@ export default function App() {
     setImporting(false); setToast(`已合并 ${courses.length} 门课程`);
   };
 
-  return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'}`}>
+  return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'} week-font-${normalizeWeekFontSize(state.settings.weekFontSize)}`}>
     <div className="wallpaper" style={wallpaperStyle} />
     <div className="wallpaper-wash" style={{ opacity: state.settings.wallpaper ? Math.max(0, 1 - state.settings.wallpaperOpacity) : 1 }} />
     {view !== 'settings' && <TopBar semester={semester} week={week} weekLabelRef={weekLabelRef} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}

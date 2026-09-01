@@ -1,4 +1,9 @@
 export const COLORS = ['#FF9D91', '#86C4FF', '#76D8B0', '#FFD36B', '#C4A5FF', '#FF9FC8', '#70D2E1', '#B9DE78'];
+export const WEEK_FONT_SIZES = ['compact', 'standard', 'large'];
+
+export function normalizeWeekFontSize(value) {
+  return WEEK_FONT_SIZES.includes(value) ? value : 'standard';
+}
 
 const span = (start, end) => Array.from({ length: end - start + 1 }, (_, index) => start + index);
 
@@ -67,6 +72,7 @@ export function makeInitialState() {
     settings: {
       theme: 'light',
       locationMode: 'room',
+      weekFontSize: 'standard',
       showInactive: true,
       wallpaper: '',
       wallpaperOpacity: 0.24,
