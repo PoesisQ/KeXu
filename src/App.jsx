@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as NativeApp } from '@capacitor/app';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   BellRing, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, FileScan,
   GraduationCap, Image as ImageIcon, LayoutGrid, MapPin, MoreHorizontal, Palette, Plus,
@@ -18,8 +18,10 @@ import { getReminderStatus, openReminderSettings, remindersAvailable, requestRem
 import { useWeekPager } from './hooks/useWeekPager';
 import { useBackHandler } from './hooks/useBackHandler';
 import { backStack } from './backNavigation';
+import { groupBadgeLabel } from './presentation';
 
 const TODAY = new Date();
+const SystemAppearance = registerPlugin('SystemAppearance');
 const shortDate = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' });
 function CardLocation({ value, context = '', lines = 2, className = 'card-location', icon = true }) {
   const text = String(value || '地点待定').trim();
@@ -149,6 +151,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
   const active = activeItems.length > 0;
   const periodSpan = group.end - group.start + 1;
   const inactiveItems = group.items.filter((item) => !item.active);
+  const groupLabel = groupBadgeLabel(activeItems.length, group.items.length);
   if (!active) return (
     <button
       className="course-card inactive inactive-strip-card inactive-group-card"
@@ -174,7 +177,7 @@ function CourseGroupCard({ group, locationMode, onOpen }) {
       aria-label={`${active ? '本周课程' : '非本周课程'}，同一时段共${group.items.length}个安排，点开查看全部`}
     >
       <span className="card-accent" />
-      <span className="slot-count">{active ? `另有${group.items.length - activeItems.length}门` : `${group.items.length}门课程`}</span>
+      <span className="slot-count">{groupLabel}</span>
       <span className="card-title">
         {course.category === '实验' && <b className="type-tag">实验</b>}
         {course.title}
@@ -667,6 +670,13 @@ export default function App() {
     onTransitionStart: (nextIndex) => previewWeekTitle(Math.floor((nextIndex - 1) / 7) + 1)
   });
   useEffect(() => { saveState(state); }, [state]);
+  useEffect(() => {
+    const dark = (state.settings.theme || 'light') === 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101512' : '#f7f3f1');
+    if (Capacitor.isNativePlatform()) SystemAppearance.apply({ dark }).catch(() => {});
+  }, [state.settings.theme]);
   useEffect(() => { previewWeekTitle(week); }, [previewWeekTitle, week]);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return undefined;
@@ -828,7 +838,7 @@ export default function App() {
     setImporting(false); setToast(`已合并 ${courses.length} 门课程`);
   };
 
-  return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'} week-font-${normalizeWeekFontSize(state.settings.weekFontSize)}`}>
+  return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'} week-font-${normalizeWeekFontSize(state.settings.weekFontSize)} ${Capacitor.getPlatform() === 'android' ? 'native-android' : ''}`}>
     <div className="wallpaper" style={wallpaperStyle} />
     <div className="wallpaper-wash" style={{ opacity: state.settings.wallpaper ? Math.max(0, 1 - state.settings.wallpaperOpacity) : 1 }} />
     {view !== 'settings' && <TopBar semester={semester} week={week} weekLabelRef={weekLabelRef} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}

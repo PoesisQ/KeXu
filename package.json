@@ -1,7 +1,7 @@
 {
   "name": "kexu",
   "private": true,
-  "version": "0.9.11",
+  "version": "0.9.12",
   "description": "A local-first, ad-free Android and PWA timetable app.",
   "license": "UNLICENSED",
   "repository": {
@@ -21,7 +21,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "check": "npm test && npm run build",
+    "check": "npm test && npm run check:android-ui && npm run build",
+    "check:android-ui": "node scripts/check-android-ui.mjs",
     "android:assets": "node scripts/generate-android-assets.mjs",
     "android:sync": "npm run build && cap sync android && npm run android:assets",
     "android:open": "cap open android"

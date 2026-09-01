@@ -5,6 +5,7 @@ import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
 import { loadState } from './storage';
 import { horizontalPagerMotion, pointerVelocity, resolveWeekSwipe, verticalMomentumDistance } from './gesture';
+import { groupBadgeLabel } from './presentation';
 
 describe('week specifications', () => {
   it('parses ranges and parity', () => {
@@ -52,6 +53,12 @@ describe('weekly slot groups', () => {
     expect(groups[0].items.map((value) => value.course.id)).toEqual(['lab', 'theory']);
     expect(groups[1].items[0].course.id).toBe('next');
     expect(groups[2].items[0].course.id).toBe('other-day');
+  });
+
+  it('never announces an impossible zero hidden-course count', () => {
+    expect(groupBadgeLabel(1, 2)).toBe('另有1门');
+    expect(groupBadgeLabel(2, 2)).toBe('同有2门');
+    expect(groupBadgeLabel(1, 1)).toBe('1门课程');
   });
 });
 
