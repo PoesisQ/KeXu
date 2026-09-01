@@ -267,7 +267,6 @@ function DayView({ semester, week, day, setDay, settings, overrides, onOpen, onA
 
 function DayPage({ semester, week, day, settings, overrides, onDay, onOpen, onAdd, onToday, className = '', style }) {
   return <section className={`day-page ${className}`} style={style}>
-    <WeekDates semester={semester} week={week} selectedDay={day} onSelectDay={onDay} />
     <DayView semester={semester} week={week} day={day} setDay={onDay} settings={settings} overrides={overrides} onOpen={onOpen} onAdd={onAdd} onToday={onToday} />
   </section>;
 }
