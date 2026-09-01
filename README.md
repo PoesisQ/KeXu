@@ -14,20 +14,6 @@ KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 
 
 当前版本：`0.9.1`
 
-## 界面预览
-
-以下截图来自项目内置的虚构演示课表，不包含真实用户、教师或学校数据。
-
-<p align="center">
-  <img src="docs/screenshots/week-light.png" width="220" alt="KeXu 周课表浅色界面" />
-  <img src="docs/screenshots/day-light.png" width="220" alt="KeXu 单日课程界面" />
-  <img src="docs/screenshots/settings-dark.png" width="220" alt="KeXu 暗色设置界面" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-picker.png" width="260" alt="KeXu 自定义设置选择面板" />
-</p>
-
 ## 设计原则
 
 - **课表优先**：启动后直接进入周课表，没有信息流和广告。
@@ -52,9 +38,20 @@ KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 
 - 周课表左右拖动实时跟手，使用速度投影判断翻页；快速甩动更容易切换周次。
 - 纵向滚动完全交给 Android WebView 合成线程处理，避免脚本惯性与系统惯性互相干扰造成闪动。
 - 同一时段跨周出现多门课程时，课表只显示对应课程颜色条；点击后列出该时段的全部本周与非本周课程。
-- 单日页面支持日期与课程内容整体跟手左右滑动；偏离今天时提供“回到今天”。
 - 点击空白节次添加课程，点击课程进入完整详情。
 - Android 系统返回键与边缘返回手势按界面层级回退：先关闭展开内容和选择面板，再关闭详情页，不会误退出应用。
+
+<p align="center">
+  <img src="docs/screenshots/week-light.png" width="260" alt="KeXu 周课表浅色界面" />
+</p>
+
+以上截图使用项目内置的虚构演示课表，不包含真实用户、教师或学校数据。
+
+单日页面支持日期与课程内容整体跟手左右滑动；偏离今天时提供“回到今天”。
+
+<p align="center">
+  <img src="docs/screenshots/day-light.png" width="260" alt="KeXu 单日课程界面" />
+</p>
 
 ### 课程编辑
 
@@ -81,6 +78,11 @@ KeXu 是一款无广告、本地优先、专注课程表本身的 Android / PWA 
 - 自定义壁纸支持适应、填充、宽度适配、拉伸、位置、缩放、亮度、模糊和 `5%–100%` 可见度。
 - 提供浅色与暗色两套界面主题，设置项使用统一的动画选择面板。
 - 支持导出格式化 JSON 备份。
+
+<p align="center">
+  <img src="docs/screenshots/settings-dark.png" width="230" alt="KeXu 暗色设置界面" />
+  <img src="docs/screenshots/settings-picker.png" width="230" alt="KeXu 自定义设置选择面板" />
+</p>
 
 ## 技术栈
 
