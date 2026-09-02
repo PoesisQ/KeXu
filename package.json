@@ -1,7 +1,7 @@
 {
   "name": "kexu",
   "private": true,
-  "version": "0.9.19",
+  "version": "0.9.20",
   "description": "A local-first, ad-free Android and PWA timetable app.",
   "license": "UNLICENSED",
   "repository": {
@@ -31,6 +31,9 @@
     "@capacitor/android": "^7.4.3",
     "@capacitor/app": "^7.1.2",
     "@capacitor/core": "^7.4.3",
+    "@capacitor/filesystem": "^7.1.8",
+    "@capacitor/share": "^7.0.4",
+    "html2canvas": "^1.4.1",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.12.2",
     "pdfjs-dist": "^4.10.38",

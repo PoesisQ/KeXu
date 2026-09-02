@@ -40,6 +40,28 @@ export function addDays(date, days) {
   return d;
 }
 
+export function shiftSemesterStart(semester, nextFirstMonday) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(semester?.firstMonday || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(nextFirstMonday || ''))) return semester;
+  const next = toISODate(nextFirstMonday);
+  const previous = toISODate(semester?.firstMonday);
+  if (next === previous) return semester;
+  const dayDelta = Math.round((parseLocalDate(next) - parseLocalDate(previous)) / 86400000);
+  return {
+    ...semester,
+    firstMonday: next,
+    courses: (semester?.courses || []).map((course) => ({
+      ...course,
+      // Meetings are stored as teaching-week numbers, so changing week one
+      // already moves them on the calendar. Milestones use absolute dates and
+      // must be shifted explicitly by the same amount.
+      milestones: (course.milestones || []).map((item) => ({
+        ...item,
+        date: item.date ? toISODate(addDays(item.date, dayDelta)) : item.date
+      }))
+    }))
+  };
+}
+
 export function currentAcademicWeek(firstMonday, today = new Date()) {
   const diff = parseLocalDate(today) - parseLocalDate(firstMonday);
   return Math.floor(diff / 604800000) + 1;

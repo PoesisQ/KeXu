@@ -3,6 +3,12 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLCHAIN_ENV="/home/poesis/tryout_DSHarness/dsh-remote/.runtime.env"
+BUILD_VARIANT="${1:-debug}"
+if [[ "$BUILD_VARIANT" != "debug" && "$BUILD_VARIANT" != "release" ]]; then
+  echo "用法: $0 [debug|release]" >&2
+  exit 2
+fi
+GRADLE_TASK="assemble${BUILD_VARIANT^}"
 
 if [ -f "$TOOLCHAIN_ENV" ]; then
   # Machine-local path only; the file is never bundled into the app.
@@ -37,13 +43,15 @@ fi
 
 cd "$PROJECT_ROOT/android"
 if [ -x "${GRADLE_BIN:-}" ]; then
-  "$GRADLE_BIN" --no-daemon assembleDebug
+  "$GRADLE_BIN" --no-daemon "$GRADLE_TASK"
 else
-  ./gradlew --no-daemon assembleDebug
+  ./gradlew --no-daemon "$GRADLE_TASK"
 fi
 
 mkdir -p "$PROJECT_ROOT/dist-apk"
 APP_VERSION="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$PROJECT_ROOT/package.json" | head -n 1)"
-APK_TARGET="$PROJECT_ROOT/dist-apk/KeXu-v${APP_VERSION:-dev}-debug.apk"
-cp "$PROJECT_ROOT/android/app/build/outputs/apk/debug/app-debug.apk" "$APK_TARGET"
+APK_SUFFIX=""
+if [ "$BUILD_VARIANT" = "debug" ]; then APK_SUFFIX="-debug"; fi
+APK_TARGET="$PROJECT_ROOT/dist-apk/KeXu-v${APP_VERSION:-dev}${APK_SUFFIX}.apk"
+cp "$PROJECT_ROOT/android/app/build/outputs/apk/$BUILD_VARIANT/app-$BUILD_VARIANT.apk" "$APK_TARGET"
 echo "APK: $APK_TARGET"

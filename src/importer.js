@@ -1,5 +1,5 @@
 import { COLORS } from './data';
-import { readDocumentFile } from './documentImporter';
+import { readDocumentFile, renderDocxPages, supportedDocumentKind } from './documentImporter';
 import { WEEKDAYS, parseWeekSpec } from './schedule';
 import { normalizeCourseTitle, restoreEnglishWordBoundaries } from './textNormalization';
 
@@ -442,11 +442,11 @@ async function imageVisionParts(file, signal) {
   }
 }
 
-export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = () => {}, signal) {
+export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = () => {}, signal, sourceLabel = '课表截图') {
   if (!apiKey) throw new Error('未配置 DeepSeek API Key');
   const content = [{
     type: 'text',
-    text: `这些图片按上传顺序共同组成一张或多张大学课表，可能是同一张长课表的连续截图。每张原图后可能附带有重叠的局部细节图；它们是同一张图的裁切，不能重复计课。
+    text: `这些图片按上传顺序共同组成一份大学课表，来源为${sourceLabel}，可能包含连续截图或 Word 表格页面。每张原图后可能附带有重叠的局部细节图；它们是同一张图的裁切，不能重复计课。
 
 先在内部完成以下检查再输出：1. 找到星期列标题与节次/时间行锚点；2. 按课程色块的空间边界确定 day、start、end，跨行色块不能只取文字所在一行；3. 区分字段语义：课程名称通常是色块主标题，教师应是人名或带“教师/老师”的字段，学分是小数，地点包含校区/楼栋/教室，培养方案或备注不能当课程名；4. 将同一课程同一属性的重复安排合并；5. 检查晚间 9-12 节和图片衔接处是否遗漏。
 
@@ -536,6 +536,19 @@ export async function recognizeScheduleFiles(inputFiles, options = {}, onProgres
   if (files.length > 8) throw new Error('一次最多选择 8 张课表图片');
   const allImages = files.every(isImageFile);
   if (files.length > 1 && !allImages) throw new Error('多文件导入仅支持图片；PDF、Excel 或 Word 请单独选择');
+  const isVisualDocx = files.length === 1 && supportedDocumentKind(files[0]) === 'docx' && options.apiKey && options.preferVision !== false;
+  if (isVisualDocx) {
+    try {
+      const pages = await renderDocxPages(files[0], onProgress, signal);
+      const result = await recognizeImagesWithDeepSeek(pages, options.apiKey, onProgress, signal, 'Word 文档渲染页面');
+      return { ...result, method: `DeepSeek Word 版面识别 · ${pages.length} 页` };
+    } catch (visionError) {
+      if (visionError.name === 'AbortError') throw visionError;
+      onProgress({ stage: 'fallback', page: 0, total: 1, progress: 0, detail: `${visionError.message} 正在保留 Word 文本作为备用结果。` });
+      const local = await recognizeSingleFile(files[0], onProgress, signal);
+      return { ...local, warning: `${visionError.message} 已回退到 Word 文本结构，请在保存前重点核对表格关系。` };
+    }
+  }
   if (allImages && options.apiKey && options.preferVision !== false) {
     try {
       return await recognizeImagesWithDeepSeek(files, options.apiKey, onProgress, signal);

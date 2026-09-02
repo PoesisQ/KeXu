@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardLocationLayout, displayLocation, formatPeriodRange, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, normalizePeriodTimes, parseWeekSpec, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
+import { cardLocationLayout, displayLocation, formatPeriodRange, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, normalizePeriodTimes, parseWeekSpec, shiftSemesterStart, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
 import { coalesceImportedCourses, deepSeekErrorMessage, parseRecognizedText } from './importer';
 import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
@@ -18,6 +18,19 @@ describe('week specifications', () => {
       { ...meeting, weeks: [1, 2] },
       { ...meeting, id: 'm1-w3', weeks: [3, 4], location: 'B' }
     ]);
+  });
+});
+
+describe('semester calendar correction', () => {
+  it('moves absolute milestones while retaining teaching-week meetings', () => {
+    const semester = {
+      firstMonday: '2026-08-31',
+      courses: [{ meetings: [{ id: 'm1', weeks: [1, 2], day: 2 }], milestones: [{ id: 'e1', date: '2026-09-15' }] }]
+    };
+    const shifted = shiftSemesterStart(semester, '2026-09-07');
+    expect(shifted.firstMonday).toBe('2026-09-07');
+    expect(shifted.courses[0].meetings).toEqual(semester.courses[0].meetings);
+    expect(shifted.courses[0].milestones[0].date).toBe('2026-09-22');
   });
 });
 

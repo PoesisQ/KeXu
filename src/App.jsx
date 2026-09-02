@@ -12,7 +12,7 @@ import { APP_NAME, APP_VERSION, backupFileName } from './config';
 import {
   DEFAULT_PERIODS, WEEKDAYS, addDays, cardLocationLayout, currentAcademicWeek, datesForWeek, displayLocation, formatPeriodRange,
   formatWeekSpec, groupOverlappingOccurrences, isMeetingActive, locationWrapParts, meetingKey, mergeImportedSemester, occurrencesForWeek, parseWeekSpec,
-  normalizePeriodTimes, resolveMeeting, shouldForceRoomWrap, splitMeetingFromWeek, toISODate
+  normalizePeriodTimes, resolveMeeting, shiftSemesterStart, shouldForceRoomWrap, splitMeetingFromWeek, toISODate
 } from './schedule';
 import { exportState, loadState, saveState } from './storage';
 import { getReminderStatus, openBatterySettings, openReminderSettings, remindersAvailable, requestReminderAccess, sendTestReminder, syncNativeReminders } from './reminders';
@@ -22,7 +22,6 @@ import { backStack } from './backNavigation';
 import { groupBadgeLabel } from './presentation';
 import { pointerVelocity, resolveRevealSwipe } from './gesture';
 
-const TODAY = new Date();
 const SystemAppearance = globalThis.__kexuSystemAppearancePlugin
   || (globalThis.__kexuSystemAppearancePlugin = registerPlugin('SystemAppearance'));
 const SEMESTER_WEEK_OPTIONS = Array.from({ length: 30 }, (_, index) => ({
@@ -44,11 +43,11 @@ function CardLocation({ value, context = '', lines = 2, className = 'card-locati
 
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
 function uid(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
-function suggestedSemesterName(date = TODAY) {
+function suggestedSemesterName(date = new Date()) {
   const year = date.getFullYear();
   return date.getMonth() >= 7 ? `${year}-${year + 1} 第1学期` : `${year - 1}-${year} 第2学期`;
 }
-function mondayOfCurrentWeek(date = TODAY) { return toISODate(addDays(date, -((date.getDay() + 6) % 7))); }
+function mondayOfCurrentWeek(date = new Date()) { return toISODate(addDays(date, -((date.getDay() + 6) % 7))); }
 
 function IconButton({ label, children, className = '', ...props }) {
   return <button type="button" aria-label={label} className={`icon-button ${className}`} {...props}>{children}</button>;
@@ -73,12 +72,12 @@ function TopBar({ semester, week, weekLabelRef, currentWeek, onNavigate, onPickW
   );
 }
 
-function WeekDates({ semester, week, selectedDay, onSelectDay }) {
+function WeekDates({ semester, week, selectedDay, onSelectDay, today }) {
   const dates = datesForWeek(semester.firstMonday, week);
   return (
     <div className="week-dates">
       {dates.map((date, index) => {
-        const isToday = toISODate(date) === toISODate(TODAY);
+        const isToday = toISODate(date) === toISODate(today);
         return (
           <button key={toISODate(date)} className={`date-head ${selectedDay === index + 1 ? 'selected' : ''} ${isToday ? 'today' : ''}`} onClick={() => onSelectDay(index + 1)}>
             <span>周{WEEKDAYS[index]}</span>
@@ -285,7 +284,7 @@ function dayMetaForIndex(semester, index) {
   return { index, week, day, date: dates[day - 1], dates };
 }
 
-function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday }) {
+function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday, today }) {
   const current = dayMetaForIndex(semester, dayIndex);
   const previous = dayMetaForIndex(semester, dayIndex - 1);
   const next = dayMetaForIndex(semester, dayIndex + 1);
@@ -314,7 +313,7 @@ function DayChrome({ semester, dayIndex, onSelectDate, onAdd, onToday }) {
       </div>
       <div className="day-hero-actions">
         <div className="today-control" aria-hidden={!onToday}>
-          {onToday && todayPages.map(({ className, meta, interactive }) => meta && toISODate(meta.date) !== toISODate(TODAY) && (interactive
+          {onToday && todayPages.map(({ className, meta, interactive }) => meta && toISODate(meta.date) !== toISODate(today) && (interactive
             ? <button className={`soft-button today-button today-visual ${className}`} key={className} onClick={onToday}>回到今天</button>
             : <span className={`soft-button today-button today-visual ${className}`} key={className} aria-hidden="true">回到今天</span>))}
         </div>
@@ -383,16 +382,9 @@ function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete
   const suppressClickRef = useRef(false);
   const applyOffset = useCallback((offset, animated) => {
     if (!surfaceRef.current) return;
-    const transition = animated ? 'transform .38s cubic-bezier(.18,.82,.22,1)' : 'none';
-    const copy = surfaceRef.current.querySelector('.semester-swipe-copy');
+    const transition = animated ? 'transform .34s cubic-bezier(.16,.84,.2,1)' : 'none';
     surfaceRef.current.style.transition = transition;
     surfaceRef.current.style.transform = `translate3d(${offset}px,0,0)`;
-    // A small opposing parallax keeps the semester name legible while the
-    // surface reveals its destructive action on narrow phones.
-    if (copy) {
-      copy.style.transition = transition;
-      copy.style.transform = `translate3d(${Math.min(SEMESTER_ACTION_WIDTH, Math.max(0, -offset))}px,0,0)`;
-    }
   }, []);
   useEffect(() => applyOffset(isOpen ? -SEMESTER_ACTION_WIDTH : 0, true), [applyOffset, isOpen]);
   const finishGesture = (event) => {
@@ -429,7 +421,9 @@ function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete
         event.preventDefault();
         try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
         let offset = gesture.startOffset + dx;
-        if (offset > 0) offset *= 0.16;
+        // The card is the solid front of a one-sided drawer. Right swipes on a
+        // closed row do not expose a destructive color on the wrong edge.
+        if (offset > 0) offset = 0;
         if (offset < -SEMESTER_ACTION_WIDTH) offset = -SEMESTER_ACTION_WIDTH + (offset + SEMESTER_ACTION_WIDTH) * 0.14;
         gesture.offset = offset;
         gesture.samples.push({ x: event.clientX, time: event.timeStamp });
@@ -445,7 +439,7 @@ function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete
       }}
     >
       <span className="semester-swipe-copy"><b>{option.label}</b><small>{option.description}</small></span>
-      <i>{selected && <Check />}</i>
+      {selected && <span className="semester-current-mark">当前</span>}
     </button>
   </div>;
 }
@@ -581,6 +575,25 @@ function PeriodTimeSheet({ value, onSave, onClose }) {
       <div className="sheet-actions"><button className="soft-button" onClick={() => setDraft(normalizePeriodTimes(DEFAULT_PERIODS))}>恢复默认</button><button className="primary-button" onClick={() => { onSave(draft); onClose(); }}>保存时间</button></div>
     </section>
     {clockPicker && <TimeWheelSheet title={clockPicker.title} value={clockPicker.value} onClose={() => setClockPicker(null)} onSelect={(clock) => setClock(clockPicker.index, clockPicker.side, clock)} />}
+  </div>;
+}
+
+function SemesterStartSheet({ semester, onSave, onClose }) {
+  useBackHandler(true, onClose);
+  const [firstMonday, setFirstMonday] = useState(semester.firstMonday);
+  const changed = firstMonday && firstMonday !== semester.firstMonday;
+  return <div className="modal-root" role="dialog" aria-modal="true" aria-label="调整学期起始日">
+    <button className="modal-backdrop" aria-label="关闭学期起始日设置" onClick={onClose} />
+    <section className="bottom-sheet semester-start-sheet">
+      <div className="sheet-handle" />
+      <div className="sheet-heading"><div><span className="eyebrow">{semester.name}</span><h2>调整第一周周一</h2></div><IconButton label="关闭" onClick={onClose}><X /></IconButton></div>
+      <div className="semester-start-body">
+        <p>如果导入时选错了日期，可在这里修正。课程仍保留原来的周次，并整体移动到新的教学周；考试、答辩和 DDL 日期也会同步平移。</p>
+        <Field label="第一周周一"><input type="date" value={firstMonday} onChange={(event) => setFirstMonday(event.target.value)} /></Field>
+        {changed && <div className="semester-shift-preview"><CalendarDays /><span><b>{semester.firstMonday}</b><ChevronRight /><b>{firstMonday}</b></span></div>}
+      </div>
+      <div className="sheet-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!changed} onClick={() => { onSave(firstMonday); onClose(); }}>保存并平移</button></div>
+    </section>
   </div>;
 }
 
@@ -776,6 +789,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
   const semesterOptions = state.semesters.map((item) => ({ value: item.id, label: item.name, description: `${item.weekCount} 周 · ${item.courses.length} 门课程` }));
   const readingTitle = progress?.stage === 'vision' ? `正在理解 ${files.length} 张图片的版面`
     : progress?.stage === 'vision-prepare' ? `正在准备第 ${progress.page}/${progress.total} 张图片`
+      : progress?.stage === 'document-render' ? '正在保留 Word 表格版面'
       : progress?.stage === 'fallback' ? '视觉识别不可用，正在安全回退'
         : progress?.stage === 'ai' ? 'DeepSeek 正在整理字段'
           : progress?.stage === 'ocr' ? `正在识别第 ${progress.page}/${progress.total} 张`
@@ -788,16 +802,16 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
       <div className="sheet-heading"><div><span className="eyebrow">智能导入</span><h2>{step === 'review' ? `确认 ${courses.length} 门课程` : '从课表开始'}</h2></div><IconButton label="关闭" onClick={close}><X /></IconButton></div>
       <div className="sheet-scroll">
         {step === 'choose' && <>
-          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>完整课表或连续截图都可以</h3><p>图片最多追加 8 张并按顺序联合识别；文档先在本地抽取结构，再由所选模式整理，不会把 Word 当图片做 OCR。</p></div>
+          <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>导入一份课表</h3><p>选择课表截图、PDF 或文档。分段截图可以连续添加，识别后会先让你核对，再保存到学期。</p></div>
           {initialSemesterId === 'new' && <div className="new-semester-intent"><Plus /><div><b>将创建一个独立新学期</b><span>识别完成后设置学期名称与第一周周一。</span></div></div>}
           <div className="recognition-mode" role="group" aria-label="课表识别方式">
-            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>DeepSeek 精确识别</b><small>图片理解版面 · 文档直接整理文本结构</small></span></button>
-            <button type="button" className={recognitionMode === 'local' ? 'active' : ''} onClick={() => setRecognitionMode('local')}><FileScan /><span><b>免费本地解析</b><small>文档读取文本 · 图片使用 OCR</small></span></button>
+            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>DeepSeek 版面识别</b><small>适合复杂截图和 Word 表格</small></span></button>
+            <button type="button" className={recognitionMode === 'local' ? 'active' : ''} onClick={() => setRecognitionMode('local')}><FileScan /><span><b>本地识别</b><small>免费，适合清晰、规则的课表</small></span></button>
           </div>
           <button className={`drop-zone ${pendingFiles.length ? 'compact-drop-zone' : ''}`} onClick={() => fileInput.current?.click()}><Upload /><span>{pendingFiles.length ? '继续添加图片' : '选择课表文件或截图'}</span><small>{pendingFiles.length ? '即使手机每次只能选择一张，也可以重复添加' : 'PDF / 图片 / Excel / CSV / DOCX / TXT / MD / JSON'}</small></button>
           <input hidden multiple ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => { if (e.target.files.length) addFiles(e.target.files); e.target.value = ''; }} />
           {pendingFiles.length > 0 && <div className="pending-files"><div className="pending-files-title"><b>{pendingFiles.every(isImage) ? `${pendingFiles.length} 张截图，按下列顺序联合识别` : '已选择文件'}</b><button onClick={() => setPendingFiles([])}>清空</button></div>{pendingFiles.map((file, index) => <div className="pending-file" key={`${file.name}-${file.size}-${file.lastModified}`}><i>{index + 1}</i><span><b>{file.name}</b><small>{Math.max(1, Math.round(file.size / 1024))} KB</small></span><button aria-label={`移除 ${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X /></button></div>)}<button className="primary-button start-recognition" onClick={() => begin()}>开始识别{pendingFiles.length > 1 ? ` ${pendingFiles.length} 张图片` : ''}</button></div>}
-          {recognitionMode === 'vision' && <p className="privacy-note">图片会发送给 DeepSeek 视觉模型；Word、Excel、PDF 文本层只发送提取出的文字与表格结构，不经过 OCR。识别结束后 KeXu 不保留文件副本。</p>}
+          {recognitionMode === 'vision' && <p className={`privacy-note ${!state.settings.apiKey ? 'key-required-note' : ''}`}>{state.settings.apiKey ? '将使用“我的”中已配置的 DeepSeek API Key。图片与 Word 版面仅在本次识别时发送，KeXu 不保留文件副本。' : '使用 DeepSeek 识别前，请先在“我的”中填写 API Key；也可以先使用免费的本地识别。'}</p>}
           {error && <p className="error-text">{error}</p>}
         </>}
         {step === 'reading' && <div className="reading-state"><div className={`scan-animation ${progress?.stage?.startsWith('vision') ? 'vision-scan' : ''}`}>{progress?.stage?.startsWith('vision') ? <Sparkles /> : <FileScan />}<i /></div><h3>{readingTitle}</h3><p>{files.map((item) => item.name).join(' · ')}</p><div className="progress"><i style={{ width: `${Math.max(5, Math.min(100, (progress?.progress || 0.02) * 100))}%` }} /></div><small>{progress?.detail || (progress?.stage === 'ocr' ? '首次使用会下载免费的中文识别模型，请保持应用在前台' : '解析器只在本次导入期间运行')} · {elapsed} 秒</small><button className="cancel-reading" onClick={cancelReading}>取消识别</button></div>}
@@ -818,7 +832,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
           <ImportPreview courses={courses} setCourses={setCourses} />
           {!courses.length && <div className="empty-recognition"><p>当前结果没有可靠拆出课程。复杂截图建议重新选择“视觉版面识别”；本地 OCR 结果也可以继续交给 DeepSeek 做文字结构校对。</p></div>}
           <button className="ai-button" onClick={aiRefine}><Sparkles />用 DeepSeek 校对结构<span>可选</span></button>
-          <details className="raw-text"><summary>查看 OCR 原文</summary><textarea value={rawText} onChange={(e) => setRawText(e.target.value)} /></details>
+          <details className="raw-text"><summary>查看识别原文与结构</summary><textarea value={rawText} onChange={(e) => setRawText(e.target.value)} /></details>
           {error && <p className="error-text">{error}</p>}
         </>}
       </div>
@@ -836,15 +850,38 @@ async function compressWallpaper(file) {
   return canvas.toDataURL('image/jpeg', 0.82);
 }
 
-function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemester, onReminderToggle, onOpenPermissions, onOpenBattery, onTestReminder, reminderStatus }) {
+function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemester, onShiftSemester, onReminderToggle, onOpenPermissions, onOpenBattery, onTestReminder, reminderStatus }) {
   const settings = state.settings;
   const wallpaperInput = useRef(null);
   const [picker, setPicker] = useState(null);
   const [semesterSheet, setSemesterSheet] = useState(false);
   const [timeSheet, setTimeSheet] = useState(false);
+  const [semesterStartSheet, setSemesterStartSheet] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [exportStatus, setExportStatus] = useState('');
   const update = (patch) => setState((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
-  const downloadBackup = () => { const url = URL.createObjectURL(exportState(state)); const anchor = document.createElement('a'); anchor.href = url; anchor.download = backupFileName(toISODate(TODAY)); anchor.click(); URL.revokeObjectURL(url); };
+  const downloadBackup = async () => {
+    const filename = backupFileName(toISODate(new Date()));
+    setExportStatus('正在准备备份…');
+    try {
+      const blob = exportState(state);
+      if (Capacitor.isNativePlatform()) {
+        const [{ Filesystem, Directory, Encoding }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
+        const saved = await Filesystem.writeFile({ path: filename, data: await blob.text(), directory: Directory.Cache, encoding: Encoding.UTF8, recursive: true });
+        await Share.share({ title: '导出 KeXu 完整备份', text: '可保存到文件或发送到其他设备', url: saved.uri, dialogTitle: '保存或发送备份' });
+        setExportStatus('备份已交给系统保存');
+      } else {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url; anchor.download = filename; anchor.style.display = 'none';
+        document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        setExportStatus('备份已下载');
+      }
+    } catch (reason) {
+      setExportStatus(reason?.message?.includes('cancel') ? '已取消导出' : '导出失败，请重试');
+    }
+  };
   const locationOptions = [
     { value: 'room', label: '只显示教室', description: '例如 A2-301' },
     { value: 'campus', label: '只显示校区', description: '隐藏楼栋和教室' },
@@ -865,8 +902,8 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
   const openPicker = (title, value, options, onSelect) => setPicker({ title, value: String(value), options, onSelect });
   return <>
   <main className="settings-view page-enter">
-    <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>识别 PDF 或课表截图并合并到学期</small></span><ChevronRight /></button></div></section>
-    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存，进入列表可左滑管理</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => setSemesterSheet(true)} /></div><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>支持截图、PDF、Word 与 Excel</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存，进入列表可左滑管理</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => setSemesterSheet(true)} /></div><button className="setting-action" onClick={() => setSemesterStartSheet(true)}><CalendarDays /><span><b>调整第一周周一</b><small>{state.semesters.find((item) => item.id === state.activeSemesterId)?.firstMonday} · 同步平移课程计划</small></span><ChevronRight /></button><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>周课表显示</h2><div className="setting-card">
       <div className="setting-row"><div><b>地点显示</b><span>完整地址仍保留在详情中</span></div><SettingChoice value={labelFor(locationOptions, settings.locationMode)} onClick={() => openPicker('地点显示', settings.locationMode, locationOptions, (value) => update({ locationMode: value }))} /></div>
         <div className="setting-row"><div><b>课程卡片字号</b><span>课程名、标签和地点会一起调整</span></div><SettingChoice value={labelFor(fontSizeOptions, normalizeWeekFontSize(settings.weekFontSize))} onClick={() => openPicker('课程卡片字号', normalizeWeekFontSize(settings.weekFontSize), fontSizeOptions, (value) => update({ weekFontSize: normalizeWeekFontSize(value) }))} /></div>
@@ -899,12 +936,13 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
       </>}
     </div></section>
     <section className="settings-group"><h2>可选视觉识别</h2><div className="setting-card"><div className="api-field"><div><b>DeepSeek API Key</b><span>仅在你主动选择“视觉识别”或“校对结构”时调用；402 表示账户余额不足</span></div><input type="password" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value.trim() })} placeholder="sk-…" /></div></div></section>
-    <section className="settings-group"><h2>数据</h2><div className="setting-card compact"><button className="setting-action" onClick={downloadBackup}><Download /><span><b>导出完整备份</b><small>课程、修改与设置</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group"><h2>数据</h2><div className="setting-card compact"><button className="setting-action" onClick={downloadBackup}><Download /><span><b>导出完整备份</b><small>{exportStatus || '课程、修改与设置，可保存或发送'}</small></span><ChevronRight /></button></div></section>
     <p className="version-note">{APP_NAME} {APP_VERSION} · 让摸鱼更高效，坐牢更舒心</p>
   </main>
   {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
   {semesterSheet && <SemesterChoiceSheet value={state.activeSemesterId} options={semesterOptions} onSelect={onSemester} onDelete={setDeleteTarget} onClose={() => setSemesterSheet(false)} />}
   {timeSheet && <PeriodTimeSheet value={settings.periodTimes} onClose={() => setTimeSheet(false)} onSave={(periodTimes) => update({ periodTimes: normalizePeriodTimes(periodTimes) })} />}
+  {semesterStartSheet && <SemesterStartSheet semester={state.semesters.find((item) => item.id === state.activeSemesterId)} onClose={() => setSemesterStartSheet(false)} onSave={onShiftSemester} />}
   {deleteTarget && <ConfirmSheet title={`删除“${deleteTarget.name}”？`} description="此操作会永久删除该学期的课程、考试日程和逐周修改。若这是最后一个学期，KeXu 会保留一个空白新学期。" confirmLabel="确认删除" onClose={() => setDeleteTarget(null)} onConfirm={() => onDeleteSemester(deleteTarget.id)} />}
   </>;
 }
@@ -921,8 +959,9 @@ export default function App() {
   const [state, setState] = useState(loadState);
   const semester = state.semesters.find((item) => item.id === state.activeSemesterId) || state.semesters[0];
   const periods = useMemo(() => normalizePeriodTimes(state.settings.periodTimes), [state.settings.periodTimes]);
+  const [today, setToday] = useState(() => new Date());
   const [week, setWeek] = useState(() => clamp(currentAcademicWeek(semester.firstMonday), 1, semester.weekCount));
-  const [day, setDay] = useState(() => clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7));
+  const [day, setDay] = useState(() => clamp(((new Date().getDay() + 6) % 7) + 1, 1, 7));
   const [view, setView] = useState('week');
   const [selected, setSelected] = useState(null);
   const [slotGroup, setSlotGroup] = useState(null);
@@ -933,8 +972,8 @@ export default function App() {
   const viewRef = useRef(view);
   const weekLabelRef = useRef(null);
   viewRef.current = view;
-  const todayWeek = currentAcademicWeek(semester.firstMonday);
-  const todayDay = clamp(((TODAY.getDay() + 6) % 7) + 1, 1, 7);
+  const todayWeek = currentAcademicWeek(semester.firstMonday, today);
+  const todayDay = clamp(((today.getDay() + 6) % 7) + 1, 1, 7);
   const semesterContainsToday = todayWeek >= 1 && todayWeek <= semester.weekCount;
   const previewWeekTitle = useCallback((nextWeek) => {
     if (weekLabelRef.current) weekLabelRef.current.textContent = `第${nextWeek}周`;
@@ -971,6 +1010,30 @@ export default function App() {
     if (Capacitor.isNativePlatform()) SystemAppearance.setTheme({ dark }).catch(() => {});
   }, [state.settings.theme]);
   useEffect(() => { previewWeekTitle(week); }, [previewWeekTitle, week]);
+  useEffect(() => {
+    let midnightTimer;
+    const refreshToday = () => {
+      const next = new Date();
+      setToday((current) => {
+        if (toISODate(current) === toISODate(next)) return current;
+        resetPager();
+        resetDayPager();
+        setWeek(clamp(currentAcademicWeek(semester.firstMonday, next), 1, semester.weekCount));
+        setDay(clamp(((next.getDay() + 6) % 7) + 1, 1, 7));
+        return next;
+      });
+    };
+    const armMidnightRefresh = () => {
+      clearTimeout(midnightTimer);
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+      midnightTimer = setTimeout(() => { refreshToday(); armMidnightRefresh(); }, Math.max(1000, nextMidnight - now));
+    };
+    const onVisibility = () => { if (!document.hidden) refreshToday(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    armMidnightRefresh();
+    return () => { clearTimeout(midnightTimer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [resetDayPager, resetPager, semester.firstMonday, semester.weekCount]);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return undefined;
     let disposed = false;
@@ -1084,6 +1147,14 @@ export default function App() {
     setToast('学期已删除');
   };
 
+  const shiftActiveSemester = (firstMonday) => {
+    setState((current) => ({
+      ...current,
+      semesters: current.semesters.map((item) => item.id === current.activeSemesterId ? shiftSemesterStart(item, firstMonday) : item)
+    }));
+    setToast('学期日期与课程计划已同步平移');
+  };
+
   const wallpaperFit = state.settings.wallpaperFit || 'contain';
   const wallpaperStyle = state.settings.wallpaper ? {
     backgroundImage: `url(${state.settings.wallpaper})`, opacity: state.settings.wallpaperOpacity,
@@ -1192,7 +1263,7 @@ export default function App() {
   return <div className={`app-shell view-${view} theme-${state.settings.theme || 'light'} week-font-${normalizeWeekFontSize(state.settings.weekFontSize)} ${Capacitor.getPlatform() === 'android' ? 'native-android' : ''}`}>
     <div className="wallpaper" style={wallpaperStyle} />
     <div className="wallpaper-wash" style={{ opacity: state.settings.wallpaper ? Math.max(0, 1 - state.settings.wallpaperOpacity) : 1 }} />
-    {view !== 'settings' && <TopBar semester={semester} week={week} weekLabelRef={weekLabelRef} currentWeek={currentAcademicWeek(semester.firstMonday)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}
+    {view !== 'settings' && <TopBar semester={semester} week={week} weekLabelRef={weekLabelRef} currentWeek={currentAcademicWeek(semester.firstMonday, today)} onNavigate={navigateWeek} onPickWeek={() => setWeekPicking(true)} openImport={() => setImporting('current')} />}
     {view === 'week' && <div
       className="week-pager"
       ref={pagerRef}
@@ -1203,7 +1274,7 @@ export default function App() {
         {[-1, 0, 1].map((slot) => {
           const pageWeek = week + slot;
           if (pageWeek < 1 || pageWeek > semester.weekCount) return null;
-          return <section className={`week-date-page carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} key={pageWeek} style={{ '--page-base': `${slot * 100}%` }}><WeekDates semester={semester} week={pageWeek} selectedDay={day} onSelectDay={slot === 0 ? setDay : () => {}} /></section>;
+          return <section className={`week-date-page carousel-page ${slot === 0 ? 'current-page' : 'side-page'}`} key={pageWeek} style={{ '--page-base': `${slot * 100}%` }}><WeekDates semester={semester} week={pageWeek} selectedDay={day} onSelectDay={slot === 0 ? setDay : () => {}} today={today} /></section>;
         })}
         <MonthCorner semester={semester} week={week} />
       </div>
@@ -1224,7 +1295,7 @@ export default function App() {
       {...dayPointerHandlers}
       onClickCapture={(event) => { if (suppressDayClickRef.current) { event.preventDefault(); event.stopPropagation(); } }}
     >
-      <DayChrome semester={semester} dayIndex={dayIndex} onSelectDate={(nextIndex) => navigateDate(nextIndex, true)} onAdd={addAt} onToday={returnToToday} />
+      <DayChrome semester={semester} dayIndex={dayIndex} onSelectDate={(nextIndex) => navigateDate(nextIndex, true)} onAdd={addAt} onToday={returnToToday} today={today} />
       <div className="day-carousel-window">
         {[-1, 0, 1].map((slot) => {
           const pageIndex = dayIndex + slot;
@@ -1235,11 +1306,11 @@ export default function App() {
         })}
       </div>
     </div>}
-    {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onDeleteSemester={deleteSemester} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} onOpenBattery={openBattery} onTestReminder={testReminder} reminderStatus={reminderStatus} />}
+    {view === 'settings' && <SettingsView state={state} setState={setState} onOpenImport={(target) => setImporting(target)} onSemester={(id) => setState((current) => ({ ...current, activeSemesterId: id }))} onDeleteSemester={deleteSemester} onShiftSemester={shiftActiveSemester} onReminderToggle={toggleReminders} onOpenPermissions={openPermissions} onOpenBattery={openBattery} onTestReminder={testReminder} reminderStatus={reminderStatus} />}
     <BottomNav view={view} setView={setView} />
     {slotGroup && <SlotSheet group={slotGroup} week={week} locationMode={state.settings.locationMode} periods={periods} onClose={() => setSlotGroup(null)} onChoose={(item) => { setSlotGroup(null); openOccurrence(item); }} />}
     {selected && <DetailSheet key={`${selected.meeting?.id}-${week}`} selected={selected} semester={semester} week={week} periods={periods} overrides={state.overrides} onClose={() => setSelected(null)} onSave={saveDetail} onDelete={deleteDetail} onAddMilestone={addMilestone} />}
-    {weekPicking && <WeekPicker semester={semester} week={week} currentWeek={currentAcademicWeek(semester.firstMonday)} onClose={() => setWeekPicking(false)} onSelect={(value) => { navigateWeek(value, true); setWeekPicking(false); }} />}
+    {weekPicking && <WeekPicker semester={semester} week={week} currentWeek={currentAcademicWeek(semester.firstMonday, today)} onClose={() => setWeekPicking(false)} onSelect={(value) => { navigateWeek(value, true); setWeekPicking(false); }} />}
     {importing && <ImportSheet state={state} initialSemesterId={importing} onClose={() => setImporting(false)} onCommit={commitImport} />}
     {toast && <div className="toast"><Check />{toast}</div>}
   </div>;

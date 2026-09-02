@@ -7,6 +7,16 @@ if (signingPropertiesFile.exists()) {
 }
 def hasKeXuSigning = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
     .every { signingProperties.getProperty(it) }
+def signingStoreFile = { String path ->
+    def normalized = path ?: ''
+    def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+    if (!isWindows && normalized ==~ /^[A-Za-z]:[\\\\\/].*/) {
+        def drive = normalized.substring(0, 1).toLowerCase()
+        def tail = normalized.substring(2).replace('\\', '/')
+        return file("/mnt/${drive}${tail.startsWith('/') ? '' : '/'}${tail}")
+    }
+    return file(normalized)
+}
 
 android {
     namespace "com.poesis.kexu"
@@ -15,8 +25,8 @@ android {
         applicationId "com.poesis.kexu"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 29
-        versionName "0.9.19"
+        versionCode 30
+        versionName "0.9.20"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -27,7 +37,7 @@ android {
     signingConfigs {
         if (hasKeXuSigning) {
             kexu {
-                storeFile file(signingProperties.getProperty('storeFile'))
+                storeFile signingStoreFile(signingProperties.getProperty('storeFile'))
                 storePassword signingProperties.getProperty('storePassword')
                 keyAlias signingProperties.getProperty('keyAlias')
                 keyPassword signingProperties.getProperty('keyPassword')
