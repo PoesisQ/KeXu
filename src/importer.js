@@ -413,7 +413,7 @@ function cropImageDataUrl(image, source, maxDimension, quality) {
   return canvas.toDataURL('image/jpeg', quality);
 }
 
-async function imageVisionParts(file, signal) {
+async function imageVisionParts(file, signal, cropMode = 'standard') {
   ensureNotAborted(signal);
   const url = URL.createObjectURL(file);
   try {
@@ -423,18 +423,33 @@ async function imageVisionParts(file, signal) {
     ensureNotAborted(signal);
     const width = image.naturalWidth;
     const height = image.naturalHeight;
+    const intensive = cropMode === 'intensive';
     const full = { x: 0, y: 0, width, height };
-    const parts = [{ label: '全图概览', url: cropImageDataUrl(image, full, 1500, 0.8) }];
+    const parts = [{ label: '全图概览（用于确定星期列、节次行和所有色块的相对位置）', url: cropImageDataUrl(image, full, 1800, 0.82) }];
     // Vision models resize each image before inference. Overlapping crops keep
     // small timetable text legible without losing the whole-page context.
+    if (cropMode === 'overview') return parts;
     if (height / width > 1.35) {
-      const cropHeight = Math.ceil(height * 0.58);
-      parts.push({ label: '上半部分细节', url: cropImageDataUrl(image, { x: 0, y: 0, width, height: cropHeight }, 1900, 0.86) });
-      parts.push({ label: '下半部分细节', url: cropImageDataUrl(image, { x: 0, y: height - cropHeight, width, height: cropHeight }, 1900, 0.86) });
-    } else if (width / height > 1.65) {
-      const cropWidth = Math.ceil(width * 0.58);
-      parts.push({ label: '左半部分细节', url: cropImageDataUrl(image, { x: 0, y: 0, width: cropWidth, height }, 1900, 0.86) });
-      parts.push({ label: '右半部分细节', url: cropImageDataUrl(image, { x: width - cropWidth, y: 0, width: cropWidth, height }, 1900, 0.86) });
+      const cropHeight = Math.ceil(height * (intensive ? 0.48 : 0.58));
+      parts.push({ label: '顶部与上午细节（含星期标题和早间节次）', url: cropImageDataUrl(image, { x: 0, y: 0, width, height: cropHeight }, 2200, 0.88) });
+      if (intensive) {
+        parts.push({ label: '中段课程细节（与上下切片均有重叠）', url: cropImageDataUrl(image, { x: 0, y: Math.round(height * 0.26), width, height: cropHeight }, 2200, 0.88) });
+      }
+      parts.push({ label: '下午与晚间细节（用全图和重叠区恢复对应星期）', url: cropImageDataUrl(image, { x: 0, y: height - cropHeight, width, height: cropHeight }, 2200, 0.88) });
+      if (intensive) {
+        const stripWidth = Math.ceil(width * 0.48);
+        [0, 0.26, 0.52].forEach((ratio, index) => parts.push({
+          label: `星期纵向细节 ${index + 1}/3（完整保留同一组星期列从表头到晚间的纵向关系）`,
+          url: cropImageDataUrl(image, { x: Math.min(width - stripWidth, Math.round(width * ratio)), y: 0, width: stripWidth, height }, 2800, 0.9)
+        }));
+      }
+    } else if (width / height > 1.25) {
+      const cropWidth = Math.ceil(width * (intensive ? 0.48 : 0.58));
+      const positions = intensive ? [0, 0.26, 0.52] : [0, 1 - (cropWidth / width)];
+      positions.forEach((ratio, index) => parts.push({
+        label: `横向表格细节 ${index + 1}/${positions.length}（与相邻切片重叠，合并表头覆盖的子列不能拆成不同星期）`,
+        url: cropImageDataUrl(image, { x: Math.min(width - cropWidth, Math.round(width * ratio)), y: 0, width: cropWidth, height }, 2400, 0.89)
+      }));
     }
     return parts;
   } finally {
@@ -442,20 +457,28 @@ async function imageVisionParts(file, signal) {
   }
 }
 
-export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = () => {}, signal, sourceLabel = '课表截图') {
+export async function recognizeImagesWithDeepSeek(files, apiKey, onProgress = () => {}, signal, sourceLabel = '课表截图', layoutContext = '') {
   if (!apiKey) throw new Error('未配置 DeepSeek API Key');
   const content = [{
     type: 'text',
     text: `这些图片按上传顺序共同组成一份大学课表，来源为${sourceLabel}，可能包含连续截图或 Word 表格页面。每张原图后可能附带有重叠的局部细节图；它们是同一张图的裁切，不能重复计课。
 
-先在内部完成以下检查再输出：1. 找到星期列标题与节次/时间行锚点；2. 按课程色块的空间边界确定 day、start、end，跨行色块不能只取文字所在一行；3. 区分字段语义：课程名称通常是色块主标题，教师应是人名或带“教师/老师”的字段，学分是小数，地点包含校区/楼栋/教室，培养方案或备注不能当课程名；4. 将同一课程同一属性的重复安排合并；5. 检查晚间 9-12 节和图片衔接处是否遗漏。
+先在内部完成以下检查再输出：1. 找到星期列标题与节次/时间行锚点；2. 按课程色块或合并单元格的空间边界确定 day、start、end，跨行色块不能只取文字所在一行；3. 区分字段语义：课程名称通常是色块主标题，教师应是人名或带“教师/老师”的字段，学分是小数，地点包含校区/楼栋/教室，培养方案或备注不能当课程名；4. 将同一课程同一属性的重复安排合并；5. 检查晚间 9-12 节和图片衔接处是否遗漏。
+
+需要特别处理两类版面：A. Word/教务系统的宽表中，一个“星期X”表头可能横跨多个子列，每个子列是不同周次或不同课程，仍全部属于该星期；左侧一个“第N节”也可能纵向合并覆盖若干子行。课程内容常按“周次/性质/课程名/教师/校区-楼-教室/人数”连续书写。B. 手机课表截图中，课程色块的横向中心决定星期，色块顶边和底边跨越的节次决定 start/end；“@教室”和括号中的楼栋方向属于地点。不能仅按 OCR 文字行顺序推断。
 
 只输出 JSON：{"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":"","category":"理论","teacher":""}]}],"issues":[]}。day 为周一 1 到周日 7，节次为 1 到 12。同名课程在周二、周三等多个时间上课时必须只建一个 course，并把每个时间分别放进 meetings；同一门课的理论、实验或实践也必须是一个 course 的不同 meeting，用 meeting.category 标明类型，不能拆成多门课。考核不是考试或地点为“未排地点”的安排优先判断为实验。英文课程名恢复单词空格。任何字段无法确定就留空，并在 recognitionNote 或 issues 说明，不要用相邻文字猜测教师或课程名。`
   }];
+  if (layoutContext) {
+    const context = String(layoutContext);
+    const compactContext = context.length <= 90000 ? context : `${context.slice(0, 45000)}\n\n【中间过长内容已省略】\n\n${context.slice(-45000)}`;
+    content.push({ type: 'text', text: `下面是从原文件直接读取的表格拓扑辅助信息。它不是另一份课表，不能重复计课。坐标和合并范围优先用于恢复星期、节次与子列关系，图片用于核对视觉边界与文字：\n\n${compactContext}` });
+  }
   let encodedSize = 0;
   for (let index = 0; index < files.length; index += 1) {
     onProgress({ stage: 'vision-prepare', page: index + 1, total: files.length, progress: (index + 0.2) / (files.length + 1), detail: '正在压缩图片，保留文字清晰度' });
-    const parts = await imageVisionParts(files[index], signal);
+    const cropMode = layoutContext || files.length > 4 ? 'overview' : files.length === 1 ? 'intensive' : 'standard';
+    const parts = await imageVisionParts(files[index], signal, cropMode);
     content.push({ type: 'text', text: `第 ${index + 1} 张原始截图（共 ${files.length} 张），下面 ${parts.length} 幅为同一截图的概览与细节：` });
     parts.forEach((part) => {
       encodedSize += part.url.length;
@@ -538,15 +561,20 @@ export async function recognizeScheduleFiles(inputFiles, options = {}, onProgres
   if (files.length > 1 && !allImages) throw new Error('多文件导入仅支持图片；PDF、Excel 或 Word 请单独选择');
   const isVisualDocx = files.length === 1 && supportedDocumentKind(files[0]) === 'docx' && options.apiKey && options.preferVision !== false;
   if (isVisualDocx) {
+    let local;
     try {
+      local = await recognizeSingleFile(files[0], onProgress, signal);
       const pages = await renderDocxPages(files[0], onProgress, signal);
-      const result = await recognizeImagesWithDeepSeek(pages, options.apiKey, onProgress, signal, 'Word 文档渲染页面');
-      return { ...result, method: `DeepSeek Word 版面识别 · ${pages.length} 页` };
+      const result = await recognizeImagesWithDeepSeek(pages, options.apiKey, onProgress, signal, 'Word 文档渲染页面', local.rawText);
+      if (result.courses.length) return { ...result, method: `DeepSeek Word 拓扑与版面识别 · ${pages.length} 页` };
+      const structured = await structureTextWithDeepSeek(local.rawText, options.apiKey, signal);
+      if (structured.courses.length) return { ...local, courses: structured.courses, method: 'Word 表格拓扑 + DeepSeek 结构化', warning: structured.warning };
+      throw new Error('没有从 Word 表格中可靠拆出课程');
     } catch (visionError) {
       if (visionError.name === 'AbortError') throw visionError;
-      onProgress({ stage: 'fallback', page: 0, total: 1, progress: 0, detail: `${visionError.message} 正在保留 Word 文本作为备用结果。` });
-      const local = await recognizeSingleFile(files[0], onProgress, signal);
-      return { ...local, warning: `${visionError.message} 已回退到 Word 文本结构，请在保存前重点核对表格关系。` };
+      onProgress({ stage: 'fallback', page: 0, total: 1, progress: 0, detail: `${visionError.message} 正在保留 Word 表格拓扑作为备用结果。` });
+      local ||= await recognizeSingleFile(files[0], onProgress, signal);
+      return { ...local, warning: `${visionError.message} 已保留 Word 表格拓扑，请在保存前重点核对星期、节次与合并单元格。` };
     }
   }
   if (allImages && options.apiKey && options.preferVision !== false) {
@@ -627,8 +655,8 @@ async function structureTextWithDeepSeek(rawText, apiKey, signal) {
     model: 'deepseek-v4-flash', temperature: 0, thinking: { type: 'disabled' }, max_tokens: 12000,
     response_format: { type: 'json_object' },
     messages: [
-      { role: 'system', content: '你是大学课表结构化与数据质检助手。输入是从 Word、Excel、PDF 文本层或纯文本直接提取的内容，不是 OCR 图片。利用字段标签、表头、行列标记和语义同时判断，绝不能把教师、专业描述、培养方案、考核说明或地点当作课程名。任何不确定字段留空并降低 confidence，不要猜测。只输出 JSON。' },
-      { role: 'user', content: `整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":"","category":"理论","teacher":""}]}],"issues":[]}。day 为周一1到周日7，节次1到12。必须检查第9-12节、跨页续写和同一课程的多个安排。同名课程跨星期上课时只建一个 course；同一门课的理论与实验也只建一个 course，并在各 meeting.category 中标注类型。英文课程名恢复单词空格。考核不是考试或地点是未排地点的安排优先作为实验。\n\n原始文档结构：\n${String(rawText || '').slice(0, 90000)}` }
+      { role: 'system', content: '你是大学课表结构化与数据质检助手。输入来自 Word/HTML 合并表格拓扑、Excel/XML 行列结构、PDF 文本层或纯文本，不是无序 OCR。必须利用行列坐标、rowspan/colspan（占N行×M列）、字段标签和语义共同判断。星期表头横跨的多个子列仍属于同一星期；节次单元格纵向覆盖的子行仍属于同一节次。绝不能把教师、专业描述、培养方案、考核说明、人数或地点当作课程名。任何不确定字段留空并降低 confidence，不要猜测。只输出 JSON。' },
+      { role: 'user', content: `整理为 {"courses":[{"title":"","teacher":"","credits":"","category":"理论","relatedId":"","confidence":0.9,"recognitionNote":"","meetings":[{"day":1,"start":1,"end":2,"weeks":"1-16","location":"","category":"理论","teacher":""}]}],"issues":[]}。day 为周一1到周日7，节次1到12。必须先建立星期表头覆盖的逻辑列范围和左侧节次覆盖的逻辑行范围，再把课程单元格按交叉位置映射；一个星期下的多个窄子列通常是不同周次或并列课程，不是多个星期。课程内容可能按“周次/本(专必)/课程名/教师/校区-楼-教室(座位)/人数”连续出现。必须检查第9-12节、跨页续写和同一课程的多个安排。同名课程跨星期上课时只建一个 course；同一门课的理论与实验也只建一个 course，并在各 meeting.category 中标注类型。英文课程名恢复单词空格。考核不是考试或地点是未排地点的安排优先作为实验。\n\n原始文档结构：\n${String(rawText || '').slice(0, 90000)}` }
     ]
   }, apiKey, signal);
   const parsed = parseModelJson(data.choices?.[0]?.message?.content);

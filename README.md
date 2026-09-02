@@ -25,7 +25,7 @@ KeXu 把课表导入、日常查看、临时修改和课前提醒放在一个应
 | 功能 | 具体内容 |
 | --- | --- |
 | 看课表 | 周课表与单日视图；左右滑动换周或换日；快速回到本周、今天 |
-| 导入 | PDF、图片、Excel、CSV、Word、TXT、Markdown、JSON；连续截图可分次追加 |
+| 导入 | PDF、图片、Excel、CSV、Word、XML、HTML 与常见文本；连续截图可分次追加 |
 | 修改 | 可只改本周一次、从某周起、本安排或整门课 |
 | 管理学期 | 新建、切换、左滑删除；可修正第一周周一并同步平移课程计划 |
 | 提醒 | Android 课前通知，显示课程、时间和完整地点；提醒分钟数可调 |
@@ -52,14 +52,14 @@ KeXu 把课表导入、日常查看、临时修改和课前提醒放在一个应
 
 - PDF：优先读取文本层，扫描版可使用本地 OCR 或可选的视觉识别。
 - 图片：PNG、JPG、WebP 等；最多 8 张联合识别，也可以一次追加一张。
-- 表格：XLSX、XLS、XLSM、XLSB、ODS、CSV、TSV。
-- 文档：DOCX、TXT、Markdown、JSON、LOG。旧版 DOC 需先另存为 DOCX。
+- 表格：XLSX、XLS、XLSM、XLSB、ODS、CSV、TSV，以及 SpreadsheetML / Excel XML。
+- 文档：DOCX、XML、HTML、TXT、Markdown、JSON、LOG。旧版 DOC 需先另存为 DOCX。
 
 ### 两种识别方式
 
-**免费本地解析**不需要 API Key。表格、Word、文本和带文本层的 PDF 会直接读取结构；图片和扫描 PDF 使用本地 OCR。
+**免费本地解析**不需要 API Key。表格、Word、XML、HTML、文本和带文本层的 PDF 会直接读取结构；图片和扫描 PDF 使用本地 OCR。
 
-**DeepSeek 版面识别**是可选项，需要用户自己的 API Key。它主要用于版面复杂的截图、连续长图和带表格的 Word 文档；Word 会保留表格布局渲染为页面后交给视觉模型，而不是压成纯文本。只有主动选择此模式时才会调用网络模型。
+**DeepSeek 版面识别**是可选项，需要用户自己的 API Key。它主要用于版面复杂的截图、连续长图和带表格的 Word 文档。Word 会同时提供渲染页面和包含合并范围的表格拓扑；长截图会生成重叠的星期列与节次细节，避免只识别文字却丢失所在行列。只有主动选择此模式时才会调用网络模型。
 
 无论使用哪种方式，导入后都会先显示课程名、教师、星期、节次、周次和地点供检查。同一课程在多个星期上课，或同时包含理论、实验和实践时，会保存为一门课程下的多个安排，方便统一修改颜色和地点。
 
@@ -96,7 +96,7 @@ vivo / OriginOS 是否将通知显示在原子岛、锁屏或其他系统区域�
 
 ## 下载与升级
 
-当前版本：`0.9.22`
+当前版本：`0.9.23`
 
 1. 前往 [GitHub Releases](https://github.com/PoesisQ/KeXu/releases/latest)。
 2. 下载 `KeXu-v*.apk`，在 Android 手机上打开并安装。
@@ -108,7 +108,7 @@ vivo / OriginOS 是否将通知显示在原子岛、锁屏或其他系统区域�
 
 - 课程、设置、壁纸和 API Key 保存在应用本地，不需要注册账号。
 - 免费本地解析不会上传课表文件。
-- 只有填写 API Key 并主动选择 DeepSeek 版面识别或校对时，相关图片、Word 渲染页面或待校对文本才会发送给模型服务。
+- 只有填写 API Key 并主动选择 DeepSeek 版面识别或校对时，相关图片、Word 渲染页面、表格拓扑或待校对文本才会发送给模型服务。
 - 导出的 JSON 可能包含课程、教师和教室信息，请自行妥善保管。
 - API Key 保存在本地 WebView 存储中，并非硬件级加密保险库，不建议在共享设备中保存私人 Key。
 
@@ -163,7 +163,7 @@ KeXu/
 └─ src/
    ├─ App.jsx               # 页面与业务编排
    ├─ importer.js          # PDF、OCR 与识别结果整理
-   ├─ documentImporter.js  # Excel、Word 与文本读取
+   ├─ documentImporter.js  # Excel、Word、XML、HTML 与文本读取
    ├─ reminders.js         # 提醒数据与原生桥接
    ├─ schedule.js          # 周次、日期和课程合并逻辑
    └─ storage.js           # 本地持久化与数据迁移

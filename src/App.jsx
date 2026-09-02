@@ -756,7 +756,7 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
     setError('');
     const combined = [...pendingFiles, ...incoming];
     if (combined.length > 1 && !combined.every(isImage)) {
-      setError('多次追加仅支持课表图片；PDF、Word、Excel 或文本请单独导入。');
+      setError('多次追加仅支持课表图片；PDF、Word、Excel、XML 或文本请单独导入。');
       if (!pendingFiles.length) setPendingFiles([incoming[0]]);
       return;
     }
@@ -824,13 +824,13 @@ function ImportSheet({ state, initialSemesterId, onClose, onCommit, onApiKey }) 
           <div className="import-intro"><div className="scan-orbit"><FileScan /></div><h3>导入一份课表</h3><p>选择课表截图、PDF 或文档。分段截图可以连续添加，识别后会先让你核对，再保存到学期。</p></div>
           {initialSemesterId === 'new' && <div className="new-semester-intent"><Plus /><div><b>将创建一个独立新学期</b><span>识别完成后设置学期名称与第一周周一。</span></div></div>}
           <div className="recognition-mode" role="group" aria-label="课表识别方式">
-            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>DeepSeek 版面识别</b><small>适合复杂截图和 Word 表格</small></span></button>
+            <button type="button" className={recognitionMode === 'vision' ? 'active' : ''} onClick={() => setRecognitionMode('vision')}><Sparkles /><span><b>DeepSeek 版面识别</b><small>适合长截图、合并表格和复杂文档</small></span></button>
             <button type="button" className={recognitionMode === 'local' ? 'active' : ''} onClick={() => setRecognitionMode('local')}><FileScan /><span><b>本地识别</b><small>免费，适合清晰、规则的课表</small></span></button>
           </div>
-          <button className={`drop-zone ${pendingFiles.length ? 'compact-drop-zone' : ''}`} onClick={() => fileInput.current?.click()}><Upload /><span>{pendingFiles.length ? '继续添加图片' : '选择课表文件或截图'}</span><small>{pendingFiles.length ? '即使手机每次只能选择一张，也可以重复添加' : 'PDF / 图片 / Excel / CSV / DOCX / TXT / MD / JSON'}</small></button>
+          <button className={`drop-zone ${pendingFiles.length ? 'compact-drop-zone' : ''}`} onClick={() => fileInput.current?.click()}><Upload /><span>{pendingFiles.length ? '继续添加图片' : '选择课表文件或截图'}</span><small>{pendingFiles.length ? '即使手机每次只能选择一张，也可以重复添加' : 'PDF / 图片 / Excel / DOCX / XML / HTML / 文本'}</small></button>
           <input hidden multiple ref={fileInput} type="file" accept={IMPORT_ACCEPT} onChange={(e) => { if (e.target.files.length) addFiles(e.target.files); e.target.value = ''; }} />
           {pendingFiles.length > 0 && <div className="pending-files"><div className="pending-files-title"><b>{pendingFiles.every(isImage) ? `${pendingFiles.length} 张截图，按下列顺序联合识别` : '已选择文件'}</b><button onClick={() => setPendingFiles([])}>清空</button></div>{pendingFiles.map((file, index) => <div className="pending-file" key={`${file.name}-${file.size}-${file.lastModified}`}><i>{index + 1}</i><span><b>{file.name}</b><small>{Math.max(1, Math.round(file.size / 1024))} KB</small></span><button aria-label={`移除 ${file.name}`} onClick={() => setPendingFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X /></button></div>)}<button className="primary-button start-recognition" onClick={() => begin()}>开始识别{pendingFiles.length > 1 ? ` ${pendingFiles.length} 张图片` : ''}</button></div>}
-          {recognitionMode === 'vision' && <p className={`privacy-note ${!state.settings.apiKey ? 'key-required-note' : ''}`}>{state.settings.apiKey ? '将使用“我的”中已配置的 DeepSeek API Key。图片与 Word 版面仅在本次识别时发送，KeXu 不保留文件副本。' : '使用 DeepSeek 识别前，请先在“我的”中填写 API Key；也可以先使用免费的本地识别。'}</p>}
+          {recognitionMode === 'vision' && <p className={`privacy-note ${!state.settings.apiKey ? 'key-required-note' : ''}`}>{state.settings.apiKey ? '将使用“我的”中已配置的 DeepSeek API Key。图片、文档版面与表格拓扑仅在本次识别时发送，KeXu 不保留文件副本。' : '使用 DeepSeek 识别前，请先在“我的”中填写 API Key；也可以先使用免费的本地识别。'}</p>}
           {error && <p className="error-text">{error}</p>}
         </>}
         {step === 'reading' && <div className="reading-state"><div className={`scan-animation ${progress?.stage?.startsWith('vision') ? 'vision-scan' : ''}`}>{progress?.stage?.startsWith('vision') ? <Sparkles /> : <FileScan />}<i /></div><h3>{readingTitle}</h3><p>{files.map((item) => item.name).join(' · ')}</p><div className="progress"><i style={{ width: `${Math.max(5, Math.min(100, (progress?.progress || 0.02) * 100))}%` }} /></div><small>{progress?.detail || (progress?.stage === 'ocr' ? '首次使用会下载免费的中文识别模型，请保持应用在前台' : '解析器只在本次导入期间运行')} · {elapsed} 秒</small><button className="cancel-reading" onClick={cancelReading}>取消识别</button></div>}
@@ -932,7 +932,7 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
   };
   return <>
   <main className="settings-view page-enter">
-    <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>支持截图、PDF、Word 与 Excel</small></span><ChevronRight /></button></div></section>
+    <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>支持截图、PDF、Word、Excel 与 XML</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>学期</h2><div className="setting-card"><div className="setting-row"><div><b>当前学期</b><span>课程按学期独立保存，进入列表可左滑管理</span></div><SettingChoice value={labelFor(semesterOptions, state.activeSemesterId)} onClick={() => setSemesterSheet(true)} /></div><button className="setting-action" onClick={() => setSemesterStartSheet(true)}><CalendarDays /><span><b>调整第一周周一</b><small>{state.semesters.find((item) => item.id === state.activeSemesterId)?.firstMonday} · 同步平移课程计划</small></span><ChevronRight /></button><button className="setting-action semester-create-action" onClick={() => onOpenImport('new')}><Plus /><span><b>新建学期并导入</b><small>识别完成后设置名称与第一周周一</small></span><ChevronRight /></button></div></section>
     <section className="settings-group"><h2>周课表显示</h2><div className="setting-card">
       <div className="setting-row"><div><b>地点显示</b><span>完整地址仍保留在详情中</span></div><SettingChoice value={labelFor(locationOptions, settings.locationMode)} onClick={() => openPicker('地点显示', settings.locationMode, locationOptions, (value) => update({ locationMode: value }))} /></div>

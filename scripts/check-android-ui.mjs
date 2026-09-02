@@ -14,6 +14,7 @@ const viewport = read('index.html');
 const buildGradle = read('android/app/build.gradle');
 const gitignore = read('.gitignore');
 const documentImporter = read('src/documentImporter.js');
+const importFormats = read('src/importFormats.js');
 const importer = read('src/importer.js');
 const reminders = read('src/reminders.js');
 const reminderPlugin = read('android/app/src/main/java/com/poesis/kexu/ReminderPlugin.java');
@@ -39,9 +40,11 @@ const checks = [
   ['签名配置与源码解耦', buildGradle.includes("rootProject.file('signing.properties')") && gitignore.includes('android/signing.properties')],
   ['文档解析器按需加载', documentImporter.includes("import('xlsx')") && documentImporter.includes("import('mammoth')")],
   ['Word 视觉模式保留表格版面', documentImporter.includes('renderDocxPages') && documentImporter.includes("import('html2canvas')") && importer.includes("sourceLabel = '课表截图'") && importer.includes('Word 文档渲染页面')],
+  ['Word 合并单元格保留表格拓扑', documentImporter.includes('htmlTablesToTopology') && documentImporter.includes('占${rowSpan}行×${columnSpan}列') && importer.includes('layoutContext')],
+  ['XML 与网页表格按需解析', documentImporter.includes('readXml') && documentImporter.includes('readHtml') && importFormats.includes("'.xml'") && importFormats.includes("'.html'")],
   ['多图视觉模型按需调用', importer.includes('deepseek-v4-flash-vision-exp') && app.includes('multiple ref={fileInput}')],
   ['单选手机可分批追加图片', app.includes('pendingFiles') && app.includes('继续添加图片') && app.includes('重复添加')],
-  ['文本文档交给结构化模型而非 OCR', importer.includes('structureTextWithDeepSeek(local.rawText') && importer.includes('输入是从 Word、Excel、PDF 文本层或纯文本直接提取的内容，不是 OCR 图片')],
+  ['文本文档交给结构化模型而非 OCR', importer.includes('structureTextWithDeepSeek(local.rawText') && importer.includes('输入来自 Word/HTML 合并表格拓扑、Excel/XML 行列结构')],
   ['低置信度导入必须提示复核', importer.includes('recognitionConfidence') && app.includes('confidence-badge')],
   ['跨日理论实验归并为课程安排', importer.includes('coalesceImportedCourses') && importer.includes('meeting.category') && app.includes('meeting.category || course.category')],
   ['导入可选择学期周数', app.includes('SEMESTER_WEEK_OPTIONS') && app.includes("title: '选择学期周数'") && app.includes('weekCount: clamp(Number(weekCount)')],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readDocumentFile, rowsToScheduleText } from './documentImporter';
+import { readDocumentFile, rowsToScheduleText, supportedDocumentKind, xmlToStructuredText } from './documentImporter';
 import { parseRecognizedText } from './importer';
 
 describe('document timetable extraction', () => {
@@ -35,5 +35,27 @@ describe('document timetable extraction', () => {
     const result = await readDocumentFile(file);
     expect(result.method).toBe('表格文本结构');
     expect(parseRecognizedText(result.rawText)[0]).toMatchObject({ title: 'Computer Network' });
+  });
+
+  it('preserves repeated XML course nodes, attributes and their paths for structuring', () => {
+    const text = xmlToStructuredText(`<?xml version="1.0"?><schedule semester="秋"><course id="A"><name>数据结构</name><meeting day="2" start="3" end="4"><room>A2-301</room></meeting></course><course id="B"><name>植物营养学</name><meeting day="5" start="1" end="2" /></course></schedule>`);
+    expect(text).toContain('schedule[1]/@semester: 秋');
+    expect(text).toContain('course[1]/name[1]: 数据结构');
+    expect(text).toContain('course[2]/name[1]: 植物营养学');
+    expect(text).toContain('/@day: 5');
+  });
+
+  it('accepts XML and HTML timetable documents as lazy document imports', () => {
+    expect(supportedDocumentKind({ name: 'schedule.xml' })).toBe('xml');
+    expect(supportedDocumentKind({ name: 'schedule.html' })).toBe('html');
+  });
+
+  it('reads generic XML as paths without routing it through image OCR', async () => {
+    const bytes = new TextEncoder().encode('<schedule><course><name>形势与政策</name><teacher>何老师</teacher><meeting day="6" start="5" end="6"><weeks>1-8</weeks><room>东教学楼-2-102</room></meeting></course></schedule>');
+    const file = { name: 'schedule.xml', type: 'application/xml', arrayBuffer: async () => bytes.buffer };
+    const result = await readDocumentFile(file);
+    expect(result.method).toBe('XML 节点结构');
+    expect(result.rawText).toContain('course[1]/name[1]: 形势与政策');
+    expect(result.rawText).toContain('/@start: 5');
   });
 });

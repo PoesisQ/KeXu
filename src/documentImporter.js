@@ -1,5 +1,7 @@
 const SHEET_EXTENSIONS = new Set(['xlsx', 'xls', 'xlsm', 'xlsb', 'ods', 'csv', 'tsv']);
 const TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'log']);
+const XML_EXTENSIONS = new Set(['xml']);
+const HTML_EXTENSIONS = new Set(['html', 'htm']);
 const DAY_CHARS = '一二三四五六日';
 
 export function fileExtension(file) {
@@ -90,6 +92,107 @@ export function rowsToScheduleText(rows, sheetName = '') {
   return [sheetName && `工作表:${sheetName}`, ...lines].filter(Boolean).join('\n');
 }
 
+function normalizedNodeText(node) {
+  if (!node) return '';
+  const clone = node.cloneNode(true);
+  clone.querySelectorAll?.('br').forEach((br) => br.replaceWith('\n'));
+  clone.querySelectorAll?.('p,div,li').forEach((block) => block.append('\n'));
+  return String(clone.textContent || '').replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, ' / ').replace(/(?:\s*\/\s*){2,}/g, ' / ').trim();
+}
+
+function tableToTopology(table, tableIndex = 0) {
+  const rows = Array.from(table.querySelectorAll(':scope > tbody > tr, :scope > thead > tr, :scope > tfoot > tr, :scope > tr'));
+  const occupied = [];
+  const records = [];
+  let columnCount = 0;
+  rows.forEach((row, rowIndex) => {
+    occupied[rowIndex] ||= [];
+    let columnIndex = 0;
+    Array.from(row.children).filter((cell) => /^(TD|TH)$/i.test(cell.tagName)).forEach((cell) => {
+      while (occupied[rowIndex][columnIndex]) columnIndex += 1;
+      const rowSpan = Math.max(1, Number(cell.getAttribute('rowspan')) || 1);
+      const columnSpan = Math.max(1, Number(cell.getAttribute('colspan')) || 1);
+      const text = normalizedNodeText(cell);
+      records.push(`[行${rowIndex + 1} 列${columnIndex + 1} 占${rowSpan}行×${columnSpan}列] ${text || '（空）'}`);
+      for (let r = rowIndex; r < rowIndex + rowSpan; r += 1) {
+        occupied[r] ||= [];
+        for (let c = columnIndex; c < columnIndex + columnSpan; c += 1) occupied[r][c] = true;
+      }
+      columnIndex += columnSpan;
+      columnCount = Math.max(columnCount, columnIndex);
+    });
+  });
+  if (!records.length) return '';
+  return `表格${tableIndex + 1}：${rows.length} 行 × ${columnCount} 个逻辑列。单元格坐标从 1 开始，“占N行×M列”表示合并范围；星期标题覆盖的所有子列都属于该星期，节次单元格覆盖的所有子行都属于该节次。\n${records.join('\n')}`;
+}
+
+export function htmlTablesToTopology(html) {
+  if (typeof DOMParser === 'undefined') return '';
+  const documentNode = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  return Array.from(documentNode.querySelectorAll('table')).map(tableToTopology).filter(Boolean).join('\n\n');
+}
+
+function htmlParagraphText(html) {
+  if (typeof DOMParser === 'undefined') return String(html || '').replace(/<[^>]+>/g, ' ');
+  const documentNode = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  documentNode.querySelectorAll('script,style,noscript').forEach((node) => node.remove());
+  return normalizedNodeText(documentNode.body);
+}
+
+function decodeXmlEntities(value) {
+  const entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return String(value || '').replace(/&(#x?[\da-f]+|amp|lt|gt|quot|apos);/gi, (_, key) => {
+    if (key[0] === '#') {
+      const hexadecimal = key[1]?.toLowerCase() === 'x';
+      const code = Number.parseInt(key.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    }
+    return entities[key.toLowerCase()] || '';
+  });
+}
+
+export function xmlToStructuredText(xml) {
+  const source = String(xml || '').replace(/<!--[\s\S]*?-->/g, '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+  const tokens = source.match(/<[^>]+>|[^<]+/g) || [];
+  const stack = [];
+  const output = [];
+  const siblingCounts = [];
+  for (const token of tokens) {
+    if (/^<\?/.test(token) || /^<!/.test(token)) continue;
+    const closing = token.match(/^<\/\s*([^>\s]+)[^>]*>/);
+    if (closing) {
+      stack.pop();
+      siblingCounts.pop();
+      continue;
+    }
+    const opening = token.match(/^<\s*([^\s/>]+)([\s\S]*?)(\/?)>/);
+    if (opening) {
+      const name = opening[1].replace(/^.*:/, '');
+      const level = Math.max(0, stack.length);
+      siblingCounts[level] ||= new Map();
+      const occurrence = (siblingCounts[level].get(name) || 0) + 1;
+      siblingCounts[level].set(name, occurrence);
+      const segment = `${name}[${occurrence}]`;
+      const path = [...stack, segment].join('/');
+      const attributes = opening[2].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g);
+      for (const attribute of attributes) {
+        const key = attribute[1].replace(/^.*:/, '');
+        const value = decodeXmlEntities(attribute[2] ?? attribute[3]);
+        if (value.trim()) output.push(`${path}/@${key}: ${value.trim()}`);
+      }
+      if (!opening[3]) {
+        stack.push(segment);
+        siblingCounts.length = stack.length + 1;
+      }
+      continue;
+    }
+    const text = decodeXmlEntities(token).replace(/\s+/g, ' ').trim();
+    if (text && stack.length) output.push(`${stack.join('/')}: ${text}`);
+  }
+  return output.slice(0, 12000).join('\n');
+}
+
 async function readSpreadsheet(file, onProgress) {
   onProgress?.({ stage: 'document', page: 1, total: 1, progress: 0.25 });
   const XLSX = await import('xlsx');
@@ -106,9 +209,14 @@ async function readDocx(file, onProgress) {
   onProgress?.({ stage: 'document', page: 1, total: 1, progress: 0.35 });
   const mammothModule = await import('mammoth');
   const mammoth = mammothModule.default || mammothModule;
-  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+  const topology = htmlTablesToTopology(result.value);
+  const paragraphText = htmlParagraphText(result.value);
   onProgress?.({ stage: 'document', page: 1, total: 1, progress: 1 });
-  return { rawText: result.value, method: 'Word 文本层', pageCount: 1 };
+  return {
+    rawText: [topology && '【Word 表格拓扑】', topology, paragraphText && '【文档文字】', paragraphText].filter(Boolean).join('\n\n'),
+    method: topology ? 'Word 表格拓扑' : 'Word 文本层', pageCount: 1
+  };
 }
 
 function canvasToFile(canvas, name) {
@@ -131,9 +239,9 @@ export async function renderDocxPages(file, onProgress = () => {}, signal) {
 
   const host = document.createElement('div');
   host.setAttribute('aria-hidden', 'true');
-  host.style.cssText = 'position:fixed;left:-12000px;top:0;width:920px;padding:52px;background:#fff;color:#111;font:18px/1.55 Arial,"Microsoft YaHei",sans-serif;box-sizing:border-box;z-index:-1;';
+  host.style.cssText = 'position:fixed;left:-12000px;top:0;width:1280px;padding:42px;background:#fff;color:#111;font:18px/1.48 Arial,"Microsoft YaHei",sans-serif;box-sizing:border-box;z-index:-1;';
   host.innerHTML = `<style>
-    table{width:100%;border-collapse:collapse;table-layout:auto;margin:12px 0}td,th{border:1px solid #777;padding:7px 9px;vertical-align:top;white-space:pre-wrap}p{margin:6px 0}img{max-width:100%;height:auto}h1,h2,h3{margin:12px 0 7px}
+    table{width:max-content;min-width:100%;max-width:2400px;border-collapse:collapse;table-layout:auto;margin:12px 0}td,th{border:1px solid #777;padding:7px 9px;min-width:72px;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}p{margin:6px 0}img{max-width:100%;height:auto}h1,h2,h3{margin:12px 0 7px}
   </style>${result.value || '<p>文档中没有可读取的内容</p>'}`;
   document.body.appendChild(host);
   try {
@@ -189,11 +297,44 @@ async function readText(file, onProgress) {
   return { rawText, method: '本地文本文档', pageCount: 1 };
 }
 
+async function readXml(file, onProgress) {
+  onProgress?.({ stage: 'document', page: 1, total: 1, progress: 0.25, detail: '正在读取 XML 节点与表格关系' });
+  const source = decodeText(await file.arrayBuffer());
+  try {
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.read(source, { type: 'string', cellDates: false, raw: false });
+    const parts = workbook.SheetNames.map((name) => {
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '', raw: false, blankrows: false });
+      return rowsToScheduleText(rows, name);
+    }).filter(Boolean);
+    if (parts.length && parts.some((part) => part.replace(/\s/g, '').length > 20)) {
+      onProgress?.({ stage: 'document', page: 1, total: 1, progress: 1 });
+      return { rawText: parts.join('\n\n'), method: 'Excel XML 表格结构', pageCount: workbook.SheetNames.length || 1 };
+    }
+  } catch { /* Generic XML is handled below without executing external entities. */ }
+  const rawText = xmlToStructuredText(source);
+  if (!rawText) throw new Error('XML 中没有找到可读取的课程或文本节点');
+  onProgress?.({ stage: 'document', page: 1, total: 1, progress: 1 });
+  return { rawText, method: 'XML 节点结构', pageCount: 1 };
+}
+
+async function readHtml(file, onProgress) {
+  onProgress?.({ stage: 'document', page: 1, total: 1, progress: 0.45, detail: '正在读取网页表格结构' });
+  const html = decodeText(await file.arrayBuffer());
+  const topology = htmlTablesToTopology(html);
+  const rawText = [topology, htmlParagraphText(html)].filter(Boolean).join('\n\n');
+  if (!rawText.trim()) throw new Error('HTML 中没有找到可读取的课表内容');
+  onProgress?.({ stage: 'document', page: 1, total: 1, progress: 1 });
+  return { rawText, method: topology ? 'HTML 表格拓扑' : 'HTML 文本结构', pageCount: 1 };
+}
+
 export function supportedDocumentKind(file) {
   const extension = fileExtension(file);
   if (SHEET_EXTENSIONS.has(extension)) return 'spreadsheet';
   if (extension === 'docx') return 'docx';
   if (TEXT_EXTENSIONS.has(extension)) return 'text';
+  if (XML_EXTENSIONS.has(extension)) return 'xml';
+  if (HTML_EXTENSIONS.has(extension)) return 'html';
   if (extension === 'doc') return 'legacy-doc';
   return '';
 }
@@ -203,6 +344,8 @@ export async function readDocumentFile(file, onProgress) {
   if (kind === 'spreadsheet') return readSpreadsheet(file, onProgress);
   if (kind === 'docx') return readDocx(file, onProgress);
   if (kind === 'text') return readText(file, onProgress);
+  if (kind === 'xml') return readXml(file, onProgress);
+  if (kind === 'html') return readHtml(file, onProgress);
   if (kind === 'legacy-doc') throw new Error('暂不支持旧版 .doc，请在 Word 中另存为 .docx 后导入');
   return null;
 }
