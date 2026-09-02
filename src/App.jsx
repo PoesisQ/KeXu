@@ -374,52 +374,67 @@ function ChoiceSheet({ title, value, options, onSelect, onClose, eyebrow = '请�
   </div>;
 }
 
-const SEMESTER_ACTION_WIDTH = 76;
+const SEMESTER_ACTION_WIDTH = 82;
 
 function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete }) {
   const surfaceRef = useRef(null);
+  const actionRef = useRef(null);
   const gestureRef = useRef(null);
-  const suppressClickRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
   const applyOffset = useCallback((offset, animated) => {
-    if (!surfaceRef.current) return;
-    const transition = animated ? 'transform .34s cubic-bezier(.16,.84,.2,1)' : 'none';
+    if (!surfaceRef.current || !actionRef.current) return;
+    const reveal = clamp(-offset, 0, SEMESTER_ACTION_WIDTH);
+    const progress = reveal / SEMESTER_ACTION_WIDTH;
+    const transition = animated
+      ? 'clip-path .36s cubic-bezier(.2,.82,.2,1), filter .28s ease'
+      : 'none';
     surfaceRef.current.style.transition = transition;
-    surfaceRef.current.style.transform = `translate3d(${offset}px,0,0)`;
+    surfaceRef.current.style.clipPath = `inset(0 ${reveal}px 0 0 round 16px)`;
+    surfaceRef.current.style.filter = `brightness(${1 - progress * 0.015})`;
+    actionRef.current.style.transition = animated
+      ? 'opacity .24s ease, transform .36s cubic-bezier(.2,.82,.2,1)'
+      : 'none';
+    actionRef.current.style.opacity = String(Math.max(0, (progress - 0.06) / 0.94));
+    actionRef.current.style.transform = `translate3d(${Math.round((1 - progress) * 18)}px,0,0) scale(${0.92 + progress * 0.08})`;
   }, []);
   useEffect(() => applyOffset(isOpen ? -SEMESTER_ACTION_WIDTH : 0, true), [applyOffset, isOpen]);
-  const finishGesture = (event) => {
+  const finishGesture = (event, cancelled = false) => {
     const gesture = gestureRef.current;
-    if (!gesture) return;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
     const velocity = pointerVelocity(gesture.samples, 'x');
-    const shouldOpen = gesture.axis === 'horizontal'
+    const shouldOpen = !cancelled && gesture.axis === 'horizontal'
       ? resolveRevealSwipe({ offset: gesture.offset, velocity, width: SEMESTER_ACTION_WIDTH })
       : isOpen;
     onOpen(shouldOpen ? option.value : null);
     applyOffset(shouldOpen ? -SEMESTER_ACTION_WIDTH : 0, true);
-    if (gesture.axis === 'horizontal') suppressClickRef.current = true;
+    if (!cancelled && gesture.axis === 'horizontal') suppressClickUntilRef.current = performance.now() + 360;
     gestureRef.current = null;
+    surfaceRef.current?.classList.remove('is-dragging');
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch {}
   };
   return <div className={`semester-swipe-row ${selected ? 'selected' : ''} ${isOpen ? 'open' : ''}`}>
-    <button type="button" className="semester-delete-reveal" tabIndex={isOpen ? 0 : -1} aria-label={`删除学期 ${option.label}`} onClick={() => onDelete({ id: option.value, name: option.label })}><Trash2 /><span>删除</span></button>
+    <button ref={actionRef} type="button" className="semester-delete-reveal" tabIndex={isOpen ? 0 : -1} aria-label={`删除学期 ${option.label}`} onClick={() => onDelete({ id: option.value, name: option.label })}><Trash2 /><span>删除</span></button>
     <button
       type="button"
       ref={surfaceRef}
       className="semester-swipe-surface"
       onPointerDown={(event) => {
-        if (event.button !== undefined && event.button !== 0) return;
-        gestureRef.current = { x: event.clientX, y: event.clientY, startOffset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, offset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, axis: '', samples: [{ x: event.clientX, time: event.timeStamp }] };
-        suppressClickRef.current = false;
+        if ((event.button !== undefined && event.button !== 0) || event.isPrimary === false) return;
+        if (!isOpen) onOpen(null);
+        surfaceRef.current?.classList.add('is-dragging');
+        gestureRef.current = { pointerId: event.pointerId, captured: false, x: event.clientX, y: event.clientY, startOffset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, offset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, axis: '', samples: [{ x: event.clientX, time: event.timeStamp }] };
       }}
       onPointerMove={(event) => {
         const gesture = gestureRef.current;
-        if (!gesture) return;
+        if (!gesture || gesture.pointerId !== event.pointerId) return;
         const dx = event.clientX - gesture.x;
         const dy = event.clientY - gesture.y;
         if (!gesture.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 6) gesture.axis = Math.abs(dx) > Math.abs(dy) * 1.18 ? 'horizontal' : 'vertical';
         if (gesture.axis !== 'horizontal') return;
         event.preventDefault();
-        try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
+        if (!gesture.captured) {
+          try { event.currentTarget.setPointerCapture(event.pointerId); gesture.captured = true; } catch {}
+        }
         let offset = gesture.startOffset + dx;
         // The card is the solid front of a one-sided drawer. Right swipes on a
         // closed row do not expose a destructive color on the wrong edge.
@@ -431,9 +446,10 @@ function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete
         applyOffset(offset, false);
       }}
       onPointerUp={finishGesture}
-      onPointerCancel={finishGesture}
+      onPointerCancel={(event) => finishGesture(event, true)}
+      onLostPointerCapture={(event) => { if (gestureRef.current?.pointerId === event.pointerId) finishGesture(event, true); }}
       onClick={(event) => {
-        if (suppressClickRef.current) { event.preventDefault(); suppressClickRef.current = false; return; }
+        if (performance.now() < suppressClickUntilRef.current) { event.preventDefault(); return; }
         if (isOpen) { onOpen(null); applyOffset(0, true); return; }
         onSelect(option.value);
       }}
@@ -900,6 +916,17 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
   const semesterOptions = state.semesters.map((item) => ({ value: item.id, label: item.name, description: `${item.weekCount} 周 · ${item.courses.length} 门课程` }));
   const labelFor = (options, value) => options.find((option) => String(option.value) === String(value))?.label || '';
   const openPicker = (title, value, options, onSelect) => setPicker({ title, value: String(value), options, onSelect });
+  const beginSemesterDelete = (target) => {
+    // Never keep two full-screen modal backdrops mounted at once. Stacked
+    // backdrop filters can stall Android WebView's compositor and leave a
+    // temporary grey frame that also delays pointer events.
+    setSemesterSheet(false);
+    setDeleteTarget(target);
+  };
+  const closeSemesterDelete = () => {
+    setDeleteTarget(null);
+    setSemesterSheet(true);
+  };
   return <>
   <main className="settings-view page-enter">
     <section className="settings-group settings-first"><h2>快捷操作</h2><div className="setting-card compact"><button className="setting-action" onClick={() => onOpenImport('current')}><FileScan /><span><b>导入新课表</b><small>支持截图、PDF、Word 与 Excel</small></span><ChevronRight /></button></div></section>
@@ -940,10 +967,10 @@ function SettingsView({ state, setState, onOpenImport, onSemester, onDeleteSemes
     <p className="version-note">{APP_NAME} {APP_VERSION} · 让摸鱼更高效，坐牢更舒心</p>
   </main>
   {picker && <ChoiceSheet {...picker} onClose={() => setPicker(null)} />}
-  {semesterSheet && <SemesterChoiceSheet value={state.activeSemesterId} options={semesterOptions} onSelect={onSemester} onDelete={setDeleteTarget} onClose={() => setSemesterSheet(false)} />}
+  {semesterSheet && <SemesterChoiceSheet value={state.activeSemesterId} options={semesterOptions} onSelect={onSemester} onDelete={beginSemesterDelete} onClose={() => setSemesterSheet(false)} />}
   {timeSheet && <PeriodTimeSheet value={settings.periodTimes} onClose={() => setTimeSheet(false)} onSave={(periodTimes) => update({ periodTimes: normalizePeriodTimes(periodTimes) })} />}
   {semesterStartSheet && <SemesterStartSheet semester={state.semesters.find((item) => item.id === state.activeSemesterId)} onClose={() => setSemesterStartSheet(false)} onSave={onShiftSemester} />}
-  {deleteTarget && <ConfirmSheet title={`删除“${deleteTarget.name}”？`} description="此操作会永久删除该学期的课程、考试日程和逐周修改。若这是最后一个学期，KeXu 会保留一个空白新学期。" confirmLabel="确认删除" onClose={() => setDeleteTarget(null)} onConfirm={() => onDeleteSemester(deleteTarget.id)} />}
+  {deleteTarget && <ConfirmSheet title={`删除“${deleteTarget.name}”？`} description="此操作会永久删除该学期的课程、考试日程和逐周修改。若这是最后一个学期，KeXu 会保留一个空白新学期。" confirmLabel="确认删除" onClose={closeSemesterDelete} onConfirm={() => onDeleteSemester(deleteTarget.id)} />}
   </>;
 }
 
