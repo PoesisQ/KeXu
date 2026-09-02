@@ -102,6 +102,8 @@ describe('momentum gestures', () => {
 
   it('opens swipe actions from either distance or a deliberate flick', () => {
     expect(resolveRevealSwipe({ offset: -42, velocity: 0, width: 76 })).toBe(true);
+    expect(resolveRevealSwipe({ offset: -24, velocity: 0, width: 76 })).toBe(true);
+    expect(resolveRevealSwipe({ offset: -15, velocity: 0, width: 76 })).toBe(false);
     expect(resolveRevealSwipe({ offset: -9, velocity: -0.45, width: 76 })).toBe(true);
     expect(resolveRevealSwipe({ offset: -18, velocity: 0.2, width: 76 })).toBe(false);
     expect(resolveRevealSwipe({ offset: -76, velocity: 0.7, width: 76 })).toBe(false);

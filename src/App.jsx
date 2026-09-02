@@ -374,7 +374,7 @@ function ChoiceSheet({ title, value, options, onSelect, onClose, eyebrow = 'è¯·é
   </div>;
 }
 
-const SEMESTER_ACTION_WIDTH = 82;
+const SEMESTER_ACTION_WIDTH = 78;
 
 function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete }) {
   const surfaceRef = useRef(null);
@@ -386,10 +386,11 @@ function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete
     const reveal = clamp(-offset, 0, SEMESTER_ACTION_WIDTH);
     const progress = reveal / SEMESTER_ACTION_WIDTH;
     const transition = animated
-      ? 'clip-path .36s cubic-bezier(.2,.82,.2,1), filter .28s ease'
+      ? 'transform .34s cubic-bezier(.18,.84,.22,1), filter .26s ease'
       : 'none';
     surfaceRef.current.style.transition = transition;
-    surfaceRef.current.style.clipPath = `inset(0 ${reveal}px 0 0 round 16px)`;
+    surfaceRef.current.style.clipPath = 'none';
+    surfaceRef.current.style.transform = `translate3d(${-reveal}px,0,0)`;
     surfaceRef.current.style.filter = `brightness(${1 - progress * 0.015})`;
     actionRef.current.style.transition = animated
       ? 'opacity .24s ease, transform .36s cubic-bezier(.2,.82,.2,1)'
@@ -422,14 +423,16 @@ function SemesterSwipeRow({ option, selected, isOpen, onOpen, onSelect, onDelete
         if ((event.button !== undefined && event.button !== 0) || event.isPrimary === false) return;
         if (!isOpen) onOpen(null);
         surfaceRef.current?.classList.add('is-dragging');
-        gestureRef.current = { pointerId: event.pointerId, captured: false, x: event.clientX, y: event.clientY, startOffset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, offset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, axis: '', samples: [{ x: event.clientX, time: event.timeStamp }] };
+        let captured = false;
+        try { event.currentTarget.setPointerCapture(event.pointerId); captured = true; } catch {}
+        gestureRef.current = { pointerId: event.pointerId, captured, x: event.clientX, y: event.clientY, startOffset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, offset: isOpen ? -SEMESTER_ACTION_WIDTH : 0, axis: '', samples: [{ x: event.clientX, time: event.timeStamp }] };
       }}
       onPointerMove={(event) => {
         const gesture = gestureRef.current;
         if (!gesture || gesture.pointerId !== event.pointerId) return;
         const dx = event.clientX - gesture.x;
         const dy = event.clientY - gesture.y;
-        if (!gesture.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 6) gesture.axis = Math.abs(dx) > Math.abs(dy) * 1.18 ? 'horizontal' : 'vertical';
+        if (!gesture.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 5) gesture.axis = Math.abs(dx) > Math.abs(dy) * 1.08 ? 'horizontal' : 'vertical';
         if (gesture.axis !== 'horizontal') return;
         event.preventDefault();
         if (!gesture.captured) {

@@ -20,7 +20,7 @@ export function resolveWeekSwipe({ offset, velocity, width, canPrevious, canNext
 export function resolveRevealSwipe({ offset, velocity, width = 76 }) {
   const safeWidth = Math.max(1, Number(width) || 76);
   const projected = Number(offset || 0) + Number(velocity || 0) * 140;
-  return projected <= -Math.min(30, safeWidth * 0.42);
+  return projected <= -Math.min(22, safeWidth * 0.3);
 }
 
 export function horizontalPagerMotion(offset, width) {
