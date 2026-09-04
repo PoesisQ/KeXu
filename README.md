@@ -96,7 +96,7 @@ vivo / OriginOS 是否将通知显示在原子岛、锁屏或其他系统区域�
 
 ## 下载与升级
 
-当前版本：`0.9.23`
+当前版本：`0.9.24`
 
 1. 前往 [GitHub Releases](https://github.com/PoesisQ/KeXu/releases/latest)。
 2. 下载 `KeXu-v*.apk`，在 Android 手机上打开并安装。

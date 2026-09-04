@@ -152,6 +152,128 @@ function decodeXmlEntities(value) {
   });
 }
 
+function xmlTagBlocks(source, localName) {
+  const tag = String(localName || '').replace(/[^a-z0-9_-]/gi, '');
+  if (!tag) return [];
+  return Array.from(String(source || '').matchAll(new RegExp(`<(?:[\\w.-]+:)?${tag}\\b[\\s\\S]*?<\\/(?:[\\w.-]+:)?${tag}\\s*>`, 'gi')), (match) => match[0]);
+}
+
+function xmlAttribute(fragment, localName) {
+  const openingTag = String(fragment || '').slice(0, Math.max(0, String(fragment || '').indexOf('>') + 1));
+  const attribute = String(localName || '').replace(/[^a-z0-9_-]/gi, '');
+  if (!attribute) return '';
+  const match = openingTag.match(new RegExp(`(?:[\\w.-]+:)?${attribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'));
+  return decodeXmlEntities(match?.[1] ?? match?.[2] ?? '');
+}
+
+function wordXmlCellText(cellXml) {
+  const paragraphs = xmlTagBlocks(cellXml, 'p').map((paragraph) => {
+    const withSeparators = paragraph
+      .replace(/<(?:[\w.-]+:)?tab\b[^>]*\/?\s*>/gi, ' ')
+      .replace(/<(?:[\w.-]+:)?(?:br|cr)\b[^>]*\/?\s*>/gi, ' / ');
+    return Array.from(withSeparators.matchAll(/<(?:[\w.-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?t\s*>/gi), (match) => decodeXmlEntities(match[1]))
+      .join('').replace(/\s+/g, ' ').trim();
+  }).filter(Boolean);
+  return paragraphs.join('/');
+}
+
+function wordXmlCell(cellXml, column) {
+  const spanMatch = cellXml.match(/<(?:[\w.-]+:)?gridSpan\b[^>]*(?:[\w.-]+:)?val\s*=\s*["'](\d+)["'][^>]*\/?\s*>/i);
+  const mergeMatch = cellXml.match(/<(?:[\w.-]+:)?vMerge\b([^>]*)\/?\s*>/i);
+  const mergeValue = mergeMatch ? xmlAttribute(`<vMerge ${mergeMatch[1]}>`, 'val') : '';
+  return {
+    column,
+    span: Math.max(1, Number(spanMatch?.[1]) || 1),
+    merge: mergeMatch ? (/restart/i.test(mergeValue) ? 'restart' : 'continue') : '',
+    text: wordXmlCellText(cellXml)
+  };
+}
+
+function wordXmlRows(tableXml) {
+  return xmlTagBlocks(tableXml, 'tr').map((rowXml) => {
+    let column = 0;
+    const cells = xmlTagBlocks(rowXml, 'tc').map((cellXml) => {
+      const cell = wordXmlCell(cellXml, column);
+      column += cell.span;
+      return cell;
+    });
+    const periodCell = cells.find((cell) => /第\s*\d{1,2}\s*节/.test(cell.text));
+    return { cells, period: Number(periodCell?.text.match(/第\s*(\d{1,2})\s*节/)?.[1]) || 0 };
+  });
+}
+
+function wordXmlCourseFields(cellText) {
+  const parts = String(cellText || '').split(/\s*\/\s*/).map((part) => part.trim());
+  const weekMatch = parts[0]?.match(/(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*(?:每?周)?/);
+  if (!weekMatch || !parts[1]) return null;
+  const title = parts[1]
+    .replace(/^(?:本|专|硕|博)?\s*[（(][^）)]{1,16}[）)]\s*/u, '')
+    .replace(/^课程\s*[:：]\s*/u, '').trim();
+  if (title.length < 2 || /^(?:课程|教师|地点|人数)$/.test(title)) return null;
+  const startWeek = Number(weekMatch[1]);
+  const endWeek = Number(weekMatch[2] || weekMatch[1]);
+  if (!startWeek || endWeek < startWeek) return null;
+  return {
+    title,
+    weeks: `${startWeek}-${endWeek}周`,
+    teacher: String(parts[2] || '').replace(/[,，、]+/g, ' ').replace(/\s+/g, ' ').trim(),
+    location: String(parts[3] || '').trim()
+  };
+}
+
+function wordXmlDocumentPart(xml) {
+  if (!/schemas\.microsoft\.com\/office\/2006\/xmlPackage/i.test(xml)) return '';
+  return xmlTagBlocks(xml, 'part').find((part) => xmlAttribute(part, 'name').replace(/\\/g, '/') === '/word/document.xml') || '';
+}
+
+/**
+ * Restores a timetable from Word 2007 Flat OPC XML. These files are XML-wrapped
+ * .docx documents: weekday ownership is expressed by gridSpan and period length
+ * by vMerge, so flattening their text destroys the schedule.
+ */
+export function flatOpcWordToScheduleText(xml) {
+  const documentPart = wordXmlDocumentPart(String(xml || ''));
+  if (!documentPart) return '';
+  const records = [];
+  for (const tableXml of xmlTagBlocks(documentPart, 'tbl')) {
+    const rows = wordXmlRows(tableXml);
+    const headerIndex = rows.findIndex((row) => row.cells.filter((cell) => canonicalDay(cell.text)).length >= 2);
+    if (headerIndex < 0) continue;
+    const dayByColumn = new Map();
+    rows[headerIndex].cells.forEach((cell) => {
+      const day = canonicalDay(cell.text);
+      if (!day) return;
+      for (let column = cell.column; column < cell.column + cell.span; column += 1) dayByColumn.set(column, day);
+    });
+    const periodRows = rows.slice(headerIndex + 1).filter((row) => row.period);
+    periodRows.forEach((row, rowIndex) => row.cells.forEach((cell) => {
+      if (!cell.text || cell.merge === 'continue') return;
+      const course = wordXmlCourseFields(cell.text);
+      if (!course) return;
+      const days = [...new Set(Array.from({ length: cell.span }, (_, offset) => dayByColumn.get(cell.column + offset)).filter(Boolean))];
+      if (!days.length) return;
+      let endPeriod = row.period;
+      if (cell.merge === 'restart') {
+        for (let nextIndex = rowIndex + 1; nextIndex < periodRows.length; nextIndex += 1) {
+          const continuation = periodRows[nextIndex].cells.find((candidate) => candidate.column === cell.column && candidate.span === cell.span);
+          if (continuation?.merge !== 'continue') break;
+          endPeriod = periodRows[nextIndex].period;
+        }
+      }
+      days.forEach((day) => records.push({ day, start: row.period, end: endPeriod, ...course }));
+    }));
+  }
+  if (!records.length) return '';
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = index + 1;
+    const lines = records.filter((record) => record.day === day).map((record) => {
+      const details = [record.location && `场地:${record.location}`, record.teacher && `教师:${record.teacher}`].filter(Boolean);
+      return `${record.title} (${record.start}-${record.end}节) ${record.weeks}${details.length ? `/${details.join('/')}` : ''}`;
+    });
+    return lines.length ? `星期${DAY_CHARS[index]}\n${lines.join('\n')}` : '';
+  }).filter(Boolean).join('\n\n');
+}
+
 export function xmlToStructuredText(xml) {
   const source = String(xml || '').replace(/<!--[\s\S]*?-->/g, '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
   const tokens = source.match(/<[^>]+>|[^<]+/g) || [];
@@ -300,6 +422,11 @@ async function readText(file, onProgress) {
 async function readXml(file, onProgress) {
   onProgress?.({ stage: 'document', page: 1, total: 1, progress: 0.25, detail: '正在读取 XML 节点与表格关系' });
   const source = decodeText(await file.arrayBuffer());
+  const wordSchedule = flatOpcWordToScheduleText(source);
+  if (wordSchedule) {
+    onProgress?.({ stage: 'document', page: 1, total: 1, progress: 1 });
+    return { rawText: wordSchedule, method: 'Word XML 表格结构', pageCount: 1 };
+  }
   try {
     const XLSX = await import('xlsx');
     const workbook = XLSX.read(source, { type: 'string', cellDates: false, raw: false });

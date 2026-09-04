@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readDocumentFile, rowsToScheduleText, supportedDocumentKind, xmlToStructuredText } from './documentImporter';
+import { flatOpcWordToScheduleText, readDocumentFile, rowsToScheduleText, supportedDocumentKind, xmlToStructuredText } from './documentImporter';
 import { parseRecognizedText } from './importer';
 
 describe('document timetable extraction', () => {
@@ -57,5 +57,26 @@ describe('document timetable extraction', () => {
     expect(result.method).toBe('XML 节点结构');
     expect(result.rawText).toContain('course[1]/name[1]: 形势与政策');
     expect(result.rawText).toContain('/@start: 5');
+  });
+
+  it('restores weekday columns and vertically merged periods from Word Flat OPC XML', async () => {
+    const xml = `<?xml version="1.0"?>
+      <pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage" xmlns:w="urn:word">
+        <pkg:part pkg:name="/word/document.xml"><pkg:xmlData><w:document><w:body><w:tbl>
+          <w:tr><w:tc><w:p/></w:tc><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>星期一</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>星期二</w:t></w:r></w:p></w:tc></w:tr>
+          <w:tr><w:tc><w:p><w:r><w:t>第3节</w:t></w:r></w:p><w:p><w:r><w:t>10:10~10:55</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>1-8每周</w:t></w:r></w:p><w:p><w:r><w:t>本(专必)先进封装技术</w:t></w:r></w:p><w:p><w:r><w:t>牟运</w:t></w:r></w:p><w:p><w:r><w:t>深圳校区-东2-104</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc><w:tc><w:p><w:r><w:t>9-9每周</w:t></w:r></w:p><w:p><w:r><w:t>本(公必)形势与政策</w:t></w:r></w:p><w:p><w:r><w:t>何老师</w:t></w:r></w:p><w:p/></w:tc></w:tr>
+          <w:tr><w:tc><w:p><w:r><w:t>第4节</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc><w:tc><w:p/></w:tc><w:tc><w:p/></w:tc></w:tr>
+        </w:tbl></w:body></w:document></pkg:xmlData></pkg:part>
+      </pkg:package>`;
+    const text = flatOpcWordToScheduleText(xml);
+    const courses = parseRecognizedText(text);
+    expect(text).toContain('先进封装技术 (3-4节) 1-8周');
+    expect(courses.find((course) => course.title === '先进封装技术')?.meetings[0]).toMatchObject({ day: 1, start: 3, end: 4, location: '深圳校区-东2-104' });
+    expect(courses.find((course) => course.title === '形势与政策')?.meetings[0]).toMatchObject({ day: 2, start: 3, end: 3, location: '', teacher: '何老师' });
+
+    const bytes = new TextEncoder().encode(xml);
+    const result = await readDocumentFile({ name: 'word-package.xml', type: 'application/xml', arrayBuffer: async () => bytes.buffer });
+    expect(result.method).toBe('Word XML 表格结构');
+    expect(parseRecognizedText(result.rawText)).toHaveLength(2);
   });
 });

@@ -54,8 +54,8 @@ function usefulTitle(value) {
 function extractNearby(block, label, fallback = '') {
   const compact = String(block || '').replace(/\s*\n\s*/g, '');
   const patterns = {
-    teacher: /(?:教师|老师)\s*[:：]?\s*([^/\n,]{2,12})/,
-    location: /(?:校区\s*[:：]?\s*)?([^/\n,]{0,20}(?:校区|园区))?\s*[/,]?\s*(?:场地|教室)\s*[:：]?\s*([^/\n,]{2,24})/,
+    teacher: /(?:教师|老师)\s*[:：]?\s*([^/\n]{2,48})/,
+    location: /(?:校区\s*[:：]?\s*)?([^/\n,]{0,30}(?:校区|园区))?\s*[/,]?\s*(?:场地|教室)\s*[:：]?\s*([^/\n,]{2,80})/,
     credits: /学分\s*[:：]?\s*(\d+(?:\.\d+)?)/,
     assessment: /考核方式\s*[:：]?\s*([^/,;]{2,10})/
   };
@@ -167,7 +167,12 @@ export function parseRecognizedText(rawText) {
         }
         if (fragments.length) title = normalizeCourseTitle(fragments.join(' ')).slice(-60);
       }
-      const context = lines.slice(lineIndex, lineIndex + 28).join('\n');
+      // Canonical document rows already carry their own labeled fields. Keeping
+      // extraction on that row prevents a missing room/teacher from borrowing
+      // the value of the next course in a dense timetable.
+      const context = /(?:教师|老师|场地|教室|学分|考核方式)\s*[:：]/.test(line)
+        ? line
+        : lines.slice(lineIndex, lineIndex + 28).join('\n');
       const day = currentDay;
       const teacher = extractNearby(context, 'teacher').replace(/^[:：]/, '');
       if (!usefulTitle(title)) {
@@ -592,10 +597,17 @@ export async function recognizeScheduleFiles(inputFiles, options = {}, onProgres
     return { ...local, courses: parseRecognizedText(local.rawText), warning: '当前使用免费本地 OCR；复杂课表只能按文字线索整理，版面还原能力有限。' };
   }
   const local = await recognizeSingleFile(files[0], onProgress, signal);
+  // Flat OPC Word tables have already been resolved from their exact grid and
+  // merge metadata. A second probabilistic pass can only lose valid rows (and
+  // previously turned a correct local result into zero courses).
+  if (local.method === 'Word XML 表格结构' && local.courses.length) return local;
   if (options.apiKey && options.preferVision !== false) {
     try {
       onProgress({ stage: 'ai', page: 1, total: 1, progress: 0.62, detail: '正在区分课程、教师、地点与描述字段' });
       const structured = await structureTextWithDeepSeek(local.rawText, options.apiKey, signal);
+      if (!structured.courses.length && local.courses.length) {
+        return { ...local, warning: '在线校对没有返回课程，已自动保留本地表格解析结果，请在保存前核对。' };
+      }
       return { ...local, courses: structured.courses, method: `${local.method} + DeepSeek 结构化`, warning: structured.warning };
     } catch (modelError) {
       if (modelError.name === 'AbortError') throw modelError;
