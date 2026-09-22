@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardLocationLayout, displayLocation, formatPeriodRange, groupOverlappingOccurrences, locationWrapParts, mergeImportedSemester, normalizePeriodTimes, parseWeekSpec, shiftSemesterStart, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
+import { cardLocationLayout, displayLocation, formatPeriodRange, groupOverlappingOccurrences, locationWrapParts, mergeDuplicateImportedCourses, mergeImportedSemester, normalizePeriodTimes, parseWeekSpec, shiftSemesterStart, shouldForceRoomWrap, splitMeetingFromWeek } from './schedule';
 import { coalesceImportedCourses, deepSeekErrorMessage, parseRecognizedText } from './importer';
 import { makeInitialState } from './data';
 import { buildReminderPayload } from './reminders';
@@ -148,6 +148,30 @@ describe('imports', () => {
     expect(course.meetings.map((meeting) => meeting.teacher)).toEqual(['陈老师', '李老师']);
   });
 
+  it('ignores unstable model relation ids when identical imported courses repeat', () => {
+    const courses = coalesceImportedCourses([
+      { id: 'a', title: '神经科学', relatedId: 'model-a', source: 'import', category: '理论', meetings: [{ id: 'a1', day: 2, start: 5, end: 6, weeks: [1, 2, 3], location: 'F3-b112' }] },
+      { id: 'b', title: '神经科学', relatedId: 'model-b', source: 'import', category: '理论', meetings: [{ id: 'b1', day: 2, start: 5, end: 6, weeks: [4, 5, 6, 7, 8], location: 'F3-b112' }] },
+      { id: 'c', title: '神经科学', relatedId: 'model-c', source: 'import', category: '理论', meetings: [{ id: 'c1', day: 2, start: 5, end: 6, weeks: [1, 2, 3], location: 'F3-b112' }] }
+    ]);
+    expect(courses).toHaveLength(1);
+    expect(courses[0].meetings).toHaveLength(1);
+    expect(courses[0].meetings[0].weeks).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('repairs historical imported duplicates while retaining distinct arrangements', () => {
+    const courses = mergeDuplicateImportedCourses([
+      { id: 'first', title: '操作系统', relatedId: 'old-a', source: 'import', color: '#111', category: '理论', meetings: [{ id: 'm1', day: 2, start: 2, end: 4, weeks: [1, 2], location: 'F3-a101', category: '理论' }] },
+      { id: 'second', title: '操作系统', relatedId: 'old-b', source: 'import', color: '#222', category: '理论', meetings: [{ id: 'm2', day: 2, start: 2, end: 4, weeks: [3, 4], location: 'F3-a101', category: '理论' }, { id: 'm3', day: 3, start: 1, end: 2, weeks: [1, 2], location: 'Lab-1', category: '实验' }] },
+      { id: 'manual', title: '操作系统', source: 'manual', meetings: [] }
+    ]);
+    expect(courses).toHaveLength(2);
+    expect(courses[0]).toMatchObject({ id: 'first', color: '#111' });
+    expect(courses[0].meetings).toHaveLength(2);
+    expect(courses[0].meetings[0].weeks).toEqual([1, 2, 3, 4]);
+    expect(courses[1].id).toBe('manual');
+  });
+
   it('does not treat a real course name beginning with 实验 as a generic lab prefix', () => {
     const courses = coalesceImportedCourses([
       { id: 'a', title: '实验心理学', category: '理论', meetings: [{ id: 'a1', day: 1, start: 1, end: 2, weeks: [1], location: '' }] },
@@ -202,8 +226,25 @@ describe('demo state and reminders', () => {
     const migrated = loadState();
     delete globalThis.localStorage;
     const migratedCurrent = migrated.semesters.find((semester) => semester.id === current.id);
-    expect(migrated.version).toBe(6);
+    expect(migrated.version).toBe(7);
     expect(migratedCurrent.courses.some((course) => course.id === 'manual-reading')).toBe(true);
+  });
+
+  it('deduplicates imported courses already stored by an older release', () => {
+    const saved = structuredClone(makeInitialState());
+    saved.semesters = [{
+      id: 'old-import', name: '旧导入', firstMonday: '2026-08-31', weekCount: 20,
+      courses: [
+        { id: 'a', title: '神经科学', relatedId: 'one', source: 'import', color: '#111', meetings: [{ id: 'a1', day: 2, start: 5, end: 6, weeks: [1, 2], location: 'F3-b112' }] },
+        { id: 'b', title: '神经科学', relatedId: 'two', source: 'import', color: '#222', meetings: [{ id: 'b1', day: 2, start: 5, end: 6, weeks: [3, 4], location: 'F3-b112' }] }
+      ]
+    }];
+    saved.activeSemesterId = 'old-import';
+    globalThis.localStorage = { getItem: () => JSON.stringify(saved) };
+    const loaded = loadState();
+    delete globalThis.localStorage;
+    expect(loaded.semesters[0].courses).toHaveLength(1);
+    expect(loaded.semesters[0].courses[0].meetings[0].weeks).toEqual([1, 2, 3, 4]);
   });
 
   it('does not silently restore a bundled semester after the user deletes it', () => {

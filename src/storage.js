@@ -1,6 +1,6 @@
 import { BUNDLED_SEMESTERS, COLORS, makeInitialState, normalizeWeekFontSize } from './data';
 import { normalizeCourseTitle } from './textNormalization';
-import { normalizePeriodTimes } from './schedule';
+import { mergeDuplicateImportedCourses, normalizePeriodTimes } from './schedule';
 
 const STORAGE_KEY = 'kexu-state-v1';
 
@@ -16,10 +16,13 @@ function normalizeCourse(course) {
 
 function normalizeSemester(semester) {
   if (!semester || typeof semester !== 'object' || !semester.id) return null;
+  const courses = Array.isArray(semester.courses) ? semester.courses.map(normalizeCourse).filter(Boolean) : [];
   return {
     ...semester,
     weekCount: Math.max(1, Number(semester.weekCount) || 20),
-    courses: Array.isArray(semester.courses) ? semester.courses.map(normalizeCourse).filter(Boolean) : []
+    // Heal duplicate imported entities created by older releases as soon as the
+    // saved state is read. Manual and bundled courses are deliberately untouched.
+    courses: mergeDuplicateImportedCourses(courses)
   };
 }
 

@@ -240,7 +240,13 @@ export function groupOverlappingOccurrences(items) {
 }
 
 export function courseFingerprint(course) {
-  const source = String(course.relatedId || course.title || '').toLowerCase()
+  // Imported relatedId values may come from a model and are not guaranteed to
+  // be stable. The normalized title is the durable identity; it also folds the
+  // usual “课程 / 课程实验” pair into one course with multiple arrangements.
+  const identitySource = course?.source === 'import'
+    ? (course.title || course.relatedId || '')
+    : (course?.relatedId || course?.title || '');
+  const source = String(identitySource).toLowerCase()
     .replace(/[（(]\s*(?:实验|实践|实训|课程设计)\s*[)）]\s*$/u, '')
     .replace(/(?:实验|实践|实训|课程设计)(?:课|课程)?\s*$/u, '')
     .replace(/^\s*(?:实验|实践|实训)(?:课|课程)?[\s·:：-]+/u, '');
@@ -251,15 +257,101 @@ function importedMeetingFingerprint(meeting) {
   return [meeting.day, meeting.start, meeting.end, meeting.category || '', meeting.teacher || ''].join('|');
 }
 
+function duplicateMeetingFingerprint(meeting) {
+  return [
+    Number(meeting?.day) || 0,
+    Number(meeting?.start) || 0,
+    Number(meeting?.end) || Number(meeting?.start) || 0,
+    String(meeting?.location || '').trim().toLowerCase(),
+    String(meeting?.category || '理论').trim(),
+    String(meeting?.teacher || '').trim().toLowerCase()
+  ].join('|');
+}
+
+function mergeMilestones(first = [], second = []) {
+  const seen = new Set();
+  return [...first, ...second].filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const key = item.id || [item.type, item.title, item.date, item.time, item.period, item.endPeriod, item.location].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Repairs model/import duplicates without touching manual or bundled courses.
+ * Exact arrangements are folded together and their teaching weeks are united;
+ * genuinely different days, periods, rooms, teachers or categories remain as
+ * separate arrangements under the same course.
+ */
+export function mergeDuplicateImportedCourses(inputCourses) {
+  const result = [];
+  const byIdentity = new Map();
+  (Array.isArray(inputCourses) ? inputCourses : []).forEach((sourceCourse) => {
+    if (!sourceCourse || typeof sourceCourse !== 'object') return;
+    if (sourceCourse.source !== 'import') {
+      result.push(sourceCourse);
+      return;
+    }
+    const identity = courseFingerprint(sourceCourse);
+    if (!identity) {
+      result.push(sourceCourse);
+      return;
+    }
+    const normalizedMeetings = (Array.isArray(sourceCourse.meetings) ? sourceCourse.meetings : []).map((meeting) => ({
+      ...meeting,
+      category: meeting.category || sourceCourse.category || '理论',
+      teacher: meeting.teacher || sourceCourse.teacher || '',
+      weeks: parseWeekSpec(meeting.weeks)
+    }));
+    const target = byIdentity.get(identity);
+    if (!target) {
+      const course = {
+        ...sourceCourse,
+        relatedId: identity,
+        meetings: [],
+        milestones: mergeMilestones(sourceCourse.milestones || [], [])
+      };
+      normalizedMeetings.forEach((meeting) => course.meetings.push(meeting));
+      byIdentity.set(identity, course);
+      result.push(course);
+      return;
+    }
+
+    normalizedMeetings.forEach((meeting) => {
+      const duplicate = target.meetings.find((current) => duplicateMeetingFingerprint(current) === duplicateMeetingFingerprint(meeting));
+      if (!duplicate) target.meetings.push(meeting);
+      else duplicate.weeks = [...new Set([...parseWeekSpec(duplicate.weeks), ...parseWeekSpec(meeting.weeks)])].sort((a, b) => a - b);
+    });
+    if (String(sourceCourse.title || '').length < String(target.title || '').length) target.title = sourceCourse.title;
+    if (!target.teacher && sourceCourse.teacher) target.teacher = sourceCourse.teacher;
+    if (!target.credits && sourceCourse.credits) target.credits = sourceCourse.credits;
+    if (!target.notes && sourceCourse.notes) target.notes = sourceCourse.notes;
+    if (!target.gradeComposition && sourceCourse.gradeComposition) target.gradeComposition = sourceCourse.gradeComposition;
+    if ((!target.rollCall || target.rollCall === '未知') && sourceCourse.rollCall) target.rollCall = sourceCourse.rollCall;
+    target.milestones = mergeMilestones(target.milestones, sourceCourse.milestones || []);
+    target.recognitionNote = [...new Set([target.recognitionNote, sourceCourse.recognitionNote].filter(Boolean))].join('；');
+    const confidenceValues = [target.recognitionConfidence, sourceCourse.recognitionConfidence].map(Number).filter(Number.isFinite);
+    if (confidenceValues.length) target.recognitionConfidence = Math.min(...confidenceValues);
+    target.category = target.category === '理论'
+      || sourceCourse.category === '理论'
+      || target.meetings.some((meeting) => meeting.category === '理论') ? '理论' : (target.category || sourceCourse.category || '实验');
+  });
+  return result;
+}
+
 export function mergeImportedSemester(existing, imported) {
-  if (!existing) return imported;
+  const incomingCourses = mergeDuplicateImportedCourses(imported?.courses || []);
+  if (!existing) return { ...imported, courses: incomingCourses };
+  const existingCourses = mergeDuplicateImportedCourses(existing.courses || []);
   const oldByFingerprint = new Map();
-  existing.courses.forEach((course) => {
+  existingCourses.forEach((course) => {
     const fingerprint = courseFingerprint(course);
     oldByFingerprint.set(fingerprint, [...(oldByFingerprint.get(fingerprint) || []), course]);
   });
-  const importedFingerprints = new Set(imported.courses.map(courseFingerprint));
-  const merged = imported.courses.map((course) => {
+  const importedFingerprints = new Set(incomingCourses.map(courseFingerprint));
+  const merged = incomingCourses.map((course) => {
     const previousCourses = oldByFingerprint.get(courseFingerprint(course)) || [];
     if (!previousCourses.length) return course;
     const previous = previousCourses[0];
@@ -279,8 +371,8 @@ export function mergeImportedSemester(existing, imported) {
       }))
     };
   });
-  existing.courses
+  existingCourses
     .filter((course) => course.source === 'manual' || !importedFingerprints.has(courseFingerprint(course)))
     .forEach((course) => merged.push(course));
-  return { ...existing, ...imported, courses: merged };
+  return { ...existing, ...imported, courses: mergeDuplicateImportedCourses(merged) };
 }

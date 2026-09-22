@@ -1,6 +1,6 @@
 import { COLORS } from './data';
 import { readDocumentFile, renderDocxPages, supportedDocumentKind } from './documentImporter';
-import { WEEKDAYS, parseWeekSpec } from './schedule';
+import { WEEKDAYS, mergeDuplicateImportedCourses, parseWeekSpec } from './schedule';
 import { normalizeCourseTitle, restoreEnglishWordBoundaries } from './textNormalization';
 
 let pdfjsPromise;
@@ -80,7 +80,10 @@ function canonicalCourseTitle(value) {
 }
 
 function importedCourseIdentity(course) {
-  const source = String(course?.relatedId || '').trim() || canonicalCourseTitle(course?.title);
+  // Model-generated relation ids are hints, not stable identifiers. Prefer the
+  // normalized course name so repeated identical rows cannot become separate
+  // colored courses merely because the model emitted different ids.
+  const source = canonicalCourseTitle(course?.title) || String(course?.relatedId || '').trim();
   return canonicalCourseTitle(source).toLowerCase().replace(/[\s·:：()（）_-]/g, '');
 }
 
@@ -129,7 +132,7 @@ export function coalesceImportedCourses(inputCourses) {
       duplicate.weeks = [...new Set([...parseWeekSpec(duplicate.weeks), ...parseWeekSpec(meeting.weeks)])].sort((a, b) => a - b);
     });
   });
-  return [...grouped.values()];
+  return mergeDuplicateImportedCourses([...grouped.values()]);
 }
 
 function occurrenceCategory(title, location, assessment) {
