@@ -254,18 +254,116 @@ export function courseFingerprint(course) {
 }
 
 function importedMeetingFingerprint(meeting) {
-  return [meeting.day, meeting.start, meeting.end, meeting.category || '', meeting.teacher || ''].join('|');
+  return [
+    meeting.day,
+    meeting.start,
+    meeting.end,
+    meeting.category || '',
+    String(meeting.teacher || '').trim().toLowerCase(),
+    normalizedLocationPart(meeting.location)
+  ].join('|');
 }
 
-function duplicateMeetingFingerprint(meeting) {
+function arrangementSlotFingerprint(meeting) {
   return [
     Number(meeting?.day) || 0,
     Number(meeting?.start) || 0,
     Number(meeting?.end) || Number(meeting?.start) || 0,
-    String(meeting?.location || '').trim().toLowerCase(),
-    String(meeting?.category || '理论').trim(),
-    String(meeting?.teacher || '').trim().toLowerCase()
+    String(meeting?.category || '理论').trim()
   ].join('|');
+}
+
+function normalizedWeekKey(meeting) {
+  return parseWeekSpec(meeting?.weeks).join(',');
+}
+
+function isPlaceholderLocation(location) {
+  const value = String(location || '').replace(/[\s·:：/_-]/g, '');
+  return !value || /(?:未排地点|地点待定|待定|未安排|暂无|无)$/.test(value);
+}
+
+function normalizedLocationPart(value) {
+  return String(value || '').trim().toLowerCase().replace(/[－–—]/g, '-').replace(/\s+/g, '');
+}
+
+function explicitCampus(location) {
+  return normalizedLocationPart(String(location || '').match(/([^/，,]*(?:校区|园区))/)?.[1]);
+}
+
+function locationsEquivalent(first, second) {
+  const left = normalizedLocationPart(first);
+  const right = normalizedLocationPart(second);
+  if (left === right) return true;
+  if (!left || !right || isPlaceholderLocation(first) || isPlaceholderLocation(second)) return false;
+  const leftRoom = normalizedLocationPart(roomOnly(first));
+  const rightRoom = normalizedLocationPart(roomOnly(second));
+  if (!leftRoom || leftRoom !== rightRoom) return false;
+  const leftCampus = explicitCampus(first);
+  const rightCampus = explicitCampus(second);
+  return !leftCampus || !rightCampus || leftCampus === rightCampus;
+}
+
+function moreCompleteLocation(first, second) {
+  if (isPlaceholderLocation(first)) return second || first;
+  if (isPlaceholderLocation(second)) return first || second;
+  const left = String(first || '').trim();
+  const right = String(second || '').trim();
+  const leftScore = (explicitCampus(left) ? 100 : 0) + left.length;
+  const rightScore = (explicitCampus(right) ? 100 : 0) + right.length;
+  return rightScore > leftScore ? right : left;
+}
+
+function mergeTeacherNames(first, second) {
+  const left = String(first || '').trim();
+  const right = String(second || '').trim();
+  if (!left) return right;
+  if (!right || left === right || left.includes(right)) return left;
+  if (right.includes(left)) return right;
+  return `${left}、${right}`;
+}
+
+function teacherValuesConflict(first, second) {
+  const left = String(first || '').trim();
+  const right = String(second || '').trim();
+  return Boolean(left && right && left !== right && !left.includes(right) && !right.includes(left));
+}
+
+function weekSetsOverlap(first, second) {
+  const left = new Set(parseWeekSpec(first?.weeks));
+  return parseWeekSpec(second?.weeks).some((week) => left.has(week));
+}
+
+function appendImportedMeeting(targetMeetings, meeting) {
+  const exact = targetMeetings.find((current) => (
+    arrangementSlotFingerprint(current) === arrangementSlotFingerprint(meeting)
+    && locationsEquivalent(current.location, meeting.location)
+    && (!teacherValuesConflict(current.teacher, meeting.teacher) || weekSetsOverlap(current, meeting))
+  ));
+  if (exact) {
+    exact.weeks = [...new Set([...parseWeekSpec(exact.weeks), ...parseWeekSpec(meeting.weeks)])].sort((a, b) => a - b);
+    exact.teacher = mergeTeacherNames(exact.teacher, meeting.teacher);
+    exact.location = moreCompleteLocation(exact.location, meeting.location);
+    return;
+  }
+
+  // Some imports describe the same lab twice: once with “未排地点” and once
+  // with the actual room. Only collapse them when their week sets are exactly
+  // equal, otherwise the room may genuinely change during the semester.
+  const betterLocationMatch = targetMeetings.find((current) => (
+    arrangementSlotFingerprint(current) === arrangementSlotFingerprint(meeting)
+    && normalizedWeekKey(current) === normalizedWeekKey(meeting)
+    && isPlaceholderLocation(current.location) !== isPlaceholderLocation(meeting.location)
+  ));
+  if (betterLocationMatch) {
+    if (isPlaceholderLocation(betterLocationMatch.location)) betterLocationMatch.location = meeting.location;
+    betterLocationMatch.teacher = mergeTeacherNames(betterLocationMatch.teacher, meeting.teacher);
+    return;
+  }
+  const next = { ...meeting };
+  if (next.id && targetMeetings.some((current) => current.id === next.id)) {
+    next.id = `${next.id}-variant-${targetMeetings.length + 1}`;
+  }
+  targetMeetings.push(next);
 }
 
 function mergeMilestones(first = [], second = []) {
@@ -313,17 +411,13 @@ export function mergeDuplicateImportedCourses(inputCourses) {
         meetings: [],
         milestones: mergeMilestones(sourceCourse.milestones || [], [])
       };
-      normalizedMeetings.forEach((meeting) => course.meetings.push(meeting));
+      normalizedMeetings.forEach((meeting) => appendImportedMeeting(course.meetings, meeting));
       byIdentity.set(identity, course);
       result.push(course);
       return;
     }
 
-    normalizedMeetings.forEach((meeting) => {
-      const duplicate = target.meetings.find((current) => duplicateMeetingFingerprint(current) === duplicateMeetingFingerprint(meeting));
-      if (!duplicate) target.meetings.push(meeting);
-      else duplicate.weeks = [...new Set([...parseWeekSpec(duplicate.weeks), ...parseWeekSpec(meeting.weeks)])].sort((a, b) => a - b);
-    });
+    normalizedMeetings.forEach((meeting) => appendImportedMeeting(target.meetings, meeting));
     if (String(sourceCourse.title || '').length < String(target.title || '').length) target.title = sourceCourse.title;
     if (!target.teacher && sourceCourse.teacher) target.teacher = sourceCourse.teacher;
     if (!target.credits && sourceCourse.credits) target.credits = sourceCourse.credits;
@@ -357,6 +451,7 @@ export function mergeImportedSemester(existing, imported) {
     const previous = previousCourses[0];
     const previousMeetings = previousCourses.flatMap((item) => item.meetings || []);
     const previousByMeeting = new Map(previousMeetings.map((meeting) => [importedMeetingFingerprint(meeting), meeting]));
+    const claimedPreviousMeetingIds = new Set();
     return {
       ...course,
       id: previous.id,
@@ -367,7 +462,21 @@ export function mergeImportedSemester(existing, imported) {
       milestones: previousCourses.flatMap((item) => item.milestones || []),
       meetings: course.meetings.map((meeting, index) => ({
         ...meeting,
-        id: previousByMeeting.get(importedMeetingFingerprint(meeting))?.id || previousMeetings[index]?.id || meeting.id
+        id: (() => {
+          const exact = previousByMeeting.get(importedMeetingFingerprint(meeting));
+          const slotCandidates = previousMeetings.filter((candidate) => (
+            arrangementSlotFingerprint(candidate) === arrangementSlotFingerprint(meeting)
+            && !claimedPreviousMeetingIds.has(candidate.id)
+          ));
+          const matched = exact && !claimedPreviousMeetingIds.has(exact.id)
+            ? exact
+            : slotCandidates.length === 1 ? slotCandidates[0] : null;
+          const fallback = previousMeetings[index];
+          const id = matched?.id
+            || (fallback && !claimedPreviousMeetingIds.has(fallback.id) ? fallback.id : meeting.id);
+          if (id) claimedPreviousMeetingIds.add(id);
+          return id;
+        })()
       }))
     };
   });

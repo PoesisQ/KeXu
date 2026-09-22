@@ -172,6 +172,86 @@ describe('imports', () => {
     expect(courses[1].id).toBe('manual');
   });
 
+  it('deduplicates repeated arrangements inside one course despite teacher noise', () => {
+    const [course] = mergeDuplicateImportedCourses([{
+      id: 'os', title: '操作系统', source: 'import', category: '理论', meetings: [
+        { id: 'm1', day: 2, start: 2, end: 4, weeks: [1, 2, 7, 8], location: 'F3-a101', category: '理论', teacher: '陈老师' },
+        { id: 'm2', day: 2, start: 2, end: 4, weeks: [1, 11, 13], location: 'F3-a101', category: '理论', teacher: '李老师' },
+        { id: 'm3', day: 2, start: 2, end: 4, weeks: [1, 2, 7, 8], location: 'F3-a101', category: '理论', teacher: '陈老师' }
+      ]
+    }]);
+    expect(course.meetings).toHaveLength(1);
+    expect(course.meetings[0].weeks).toEqual([1, 2, 7, 8, 11, 13]);
+    expect(course.meetings[0].teacher).toBe('陈老师、李老师');
+  });
+
+  it('keeps disjoint-week teacher changes as separate arrangements', () => {
+    const [course] = mergeDuplicateImportedCourses([{
+      id: 'os', title: '操作系统', source: 'import', category: '理论', meetings: [
+        { id: 'first', day: 2, start: 2, end: 4, weeks: [1, 2], location: 'F3-a101', category: '理论', teacher: '陈老师' },
+        { id: 'second', day: 2, start: 2, end: 4, weeks: [3, 4], location: 'F3-a101', category: '理论', teacher: '李老师' }
+      ]
+    }]);
+    expect(course.meetings).toHaveLength(2);
+  });
+
+  it('recognizes a room-only location as the same arrangement as its full address', () => {
+    const [course] = mergeDuplicateImportedCourses([{
+      id: 'os', title: '操作系统', source: 'import', category: '理论', meetings: [
+        { id: 'short', day: 2, start: 2, end: 4, weeks: [1, 2], location: 'F3-a101', category: '理论' },
+        { id: 'full', day: 2, start: 2, end: 4, weeks: [3, 4], location: '广州国际校区/场地:F3-a101', category: '理论' }
+      ]
+    }]);
+    expect(course.meetings).toHaveLength(1);
+    expect(course.meetings[0]).toMatchObject({ id: 'short', location: '广州国际校区/场地:F3-a101', weeks: [1, 2, 3, 4] });
+  });
+
+  it('prefers a real lab room over an equal placeholder without erasing meaningful variants', () => {
+    const [course] = mergeDuplicateImportedCourses([{
+      id: 'os', title: '操作系统', source: 'import', category: '理论', meetings: [
+        { id: 'theory', day: 3, start: 1, end: 4, weeks: [3, 4, 9, 12], location: '未排地点', category: '理论' },
+        { id: 'lab-missing', day: 3, start: 1, end: 4, weeks: [3, 4, 9, 12], location: '未排地点', category: '实验' },
+        { id: 'lab-room', day: 3, start: 1, end: 4, weeks: [3, 4, 9, 12], location: 'D3-b315', category: '实验' },
+        { id: 'lab-other-room', day: 3, start: 1, end: 4, weeks: [3, 4, 9, 12], location: 'D3-b316', category: '实验' }
+      ]
+    }]);
+    expect(course.meetings).toHaveLength(3);
+    expect(course.meetings).toContainEqual(expect.objectContaining({ id: 'theory', category: '理论', location: '未排地点' }));
+    expect(course.meetings).toContainEqual(expect.objectContaining({ id: 'lab-missing', category: '实验', location: 'D3-b315' }));
+    expect(course.meetings).toContainEqual(expect.objectContaining({ id: 'lab-other-room', category: '实验', location: 'D3-b316' }));
+  });
+
+  it('keeps distinct ids when reimporting simultaneous lab rooms', () => {
+    const existing = { courses: [{
+      id: 'old-course', title: '操作系统', source: 'import', category: '理论', meetings: [
+        { id: 'old-315', day: 3, start: 1, end: 4, weeks: [3, 4], location: 'D3-b315', category: '实验' },
+        { id: 'old-316', day: 3, start: 1, end: 4, weeks: [3, 4], location: 'D3-b316', category: '实验' }
+      ]
+    }] };
+    const imported = { courses: [{
+      id: 'new-course', title: '操作系统实验', source: 'import', category: '实验', meetings: [
+        { id: 'new-316', day: 3, start: 1, end: 4, weeks: [3, 4, 9], location: 'D3-b316', category: '实验' },
+        { id: 'new-315', day: 3, start: 1, end: 4, weeks: [3, 4, 9], location: 'D3-b315', category: '实验' }
+      ]
+    }] };
+    const [course] = mergeImportedSemester(existing, imported).courses;
+    expect(course.id).toBe('old-course');
+    expect(course.meetings.map((meeting) => [meeting.location, meeting.id])).toEqual([
+      ['D3-b316', 'old-316'], ['D3-b315', 'old-315']
+    ]);
+  });
+
+  it('repairs duplicate meeting ids without merging real room variants', () => {
+    const [course] = mergeDuplicateImportedCourses([{
+      id: 'course', title: '操作系统', source: 'import', meetings: [
+        { id: 'same', day: 3, start: 1, end: 4, weeks: [3, 4], location: 'D3-b315', category: '实验' },
+        { id: 'same', day: 3, start: 1, end: 4, weeks: [3, 4], location: 'D3-b316', category: '实验' }
+      ]
+    }]);
+    expect(course.meetings).toHaveLength(2);
+    expect(new Set(course.meetings.map((meeting) => meeting.id)).size).toBe(2);
+  });
+
   it('does not treat a real course name beginning with 实验 as a generic lab prefix', () => {
     const courses = coalesceImportedCourses([
       { id: 'a', title: '实验心理学', category: '理论', meetings: [{ id: 'a1', day: 1, start: 1, end: 2, weeks: [1], location: '' }] },
@@ -226,7 +306,7 @@ describe('demo state and reminders', () => {
     const migrated = loadState();
     delete globalThis.localStorage;
     const migratedCurrent = migrated.semesters.find((semester) => semester.id === current.id);
-    expect(migrated.version).toBe(7);
+    expect(migrated.version).toBe(8);
     expect(migratedCurrent.courses.some((course) => course.id === 'manual-reading')).toBe(true);
   });
 
